@@ -33,6 +33,7 @@ struct Window {
 }
 
 pub struct Engine {
+    running: bool,
     root: Root,
     view: Window,
     ui: Window,
@@ -72,6 +73,7 @@ impl Engine {
         let view_height = screen_height - panel_height - 2;
 
         Engine {
+            running: true,
             root: root,
             view: Window {
                 con: Offscreen::new(view_width, view_height),
@@ -93,12 +95,13 @@ impl Engine {
     }
 
     pub fn running(&self) -> bool {
-        !self.root.window_closed()
+        !self.root.window_closed() && self.running
     }
 
     pub fn exit(&mut self) {
         // Toggle off fullscreen to avoid messing up the resolution
         self.root.set_fullscreen(false);
+        self.running = false;
     }
 
     pub fn next_command(&mut self) -> Command {

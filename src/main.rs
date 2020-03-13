@@ -7,7 +7,7 @@ pub mod rng;
 pub mod dungeon;
 
 use crate::engine::{Engine, Command, colors};
-use crate::game::{Game, Object, Messages};
+use crate::game::{Game, Object, Messages, Action};
 
 
 /// Width of the game screen in number of tiles
@@ -46,6 +46,11 @@ pub struct Dimension(pub i32, pub i32);
 
 /// Main entry point
 fn main() {
+    let present = main_render;
+    let accept = main_accept;
+    let interpret = main_interpret;
+    let update = main_update;
+
     // Create a player and an NPC
     let player = Object::player(Location(0, 0), "Rodney");
 
@@ -73,56 +78,68 @@ fn main() {
     let messages = game.update(false);
     game.messages.append(messages);
 
-    let mut player_turn: game::Turn = vec![];
     while engine.running() {
-        engine.render(&game);
+        present(&mut engine, &game);
+        let command = accept(&mut engine);
+        let action = interpret(&mut engine, &mut game, command);
+        if let Some(action) = action {
+            update(&mut game, action);
+        }
+    }
+}
 
-        let (action, messages) = match engine.next_command() {
-            // System
-            Command::Nothing => (None, Messages::empty()),
-            Command::ToggleFullScreen => {
-                engine.toggle_fullscreen();
-                (None, Messages::new("Fullscreen toggled", colors::WHITE))
-            }
-            Command::Exit => {
-                engine.exit();
-                println!("Game turns: {}", game.turn);
-                break;
-            }
-            // Handle the remaining commands as player actions
-            command => game.player_turn(&command, &mut engine),
-        };
+fn main_accept(engine: &mut Engine) -> Command {
+    engine.next_command()
+}
+
+fn main_render(engine: &mut Engine, game: &Game) {
+    engine.render(game);
+}
+
+fn main_interpret(engine: &mut Engine, game: &mut Game, command: Command) -> Option<Action> {
+    let (action, messages) = match command {
+        // System
+        Command::Nothing => (None, Messages::empty()),
+        Command::ToggleFullScreen => {
+            engine.toggle_fullscreen();
+            (None, Messages::new("Fullscreen toggled", colors::WHITE))
+        }
+        Command::Exit => {
+            engine.exit();
+            println!("Game turns: {}", game.turn);
+            return None;
+        }
+        // Handle the remaining commands as player actions
+        command => game.player_turn(&command, engine),
+    };
+    game.messages.append(messages);
+    action
+}
+
+fn main_update(game: &mut Game, action: Action) {
+    // First play the player turn
+    game.player_turn.push(action);
+    game.play(&vec![action]);
+
+    let messages = game.update(false);
+    game.messages.append(messages);
+
+    // Some actions don't consume a turn
+    if action.took_turn() {
+        // Calculate the reaction of the AI and play
+        // the AI turn.
+        let ai_turns = game.ai_turns();
+        game.play(&ai_turns);
+
+        let messages = game.update(true);
         game.messages.append(messages);
 
-        // Some commands do not result in the player performing
-        // an action. In that case no turns are played out.
-        if let Some(action) = action {
+        // Record the turn
+        println!("{}: {:?}", game.turn + 1, (&game.player_turn, &ai_turns));
+        game.turn(game.player_turn.clone(), ai_turns);
 
-            // First play the player turn
-            player_turn.push(action);
-            game.play(&vec![action]);
-            let messages = game.update(false);
-            game.messages.append(messages);
-
-            // Some actions don't consume a turn
-            if action.took_turn() {
-                // Calculate the reaction of the AI and play
-                // the AI turn.
-                let ai_turns = game.ai_turns();
-                game.play(&ai_turns);
-
-                let messages = game.update(true);
-                game.messages.append(messages);
-
-                // Record the turn
-                println!("{}: {:?}", game.turn + 1, (&player_turn, &ai_turns));
-                game.turn(player_turn.clone(), ai_turns);
-                player_turn.clear();
-
-                // Start the turn
-                println!("--- [{}] ---", game.turn + 1);
-                game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
-            }
-        }
+        // Start the turn
+        println!("--- [{}] ---", game.turn + 1);
+        game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
     }
 }

@@ -155,8 +155,10 @@ fn create_item(room: Rect) -> Object {
     let roll = rng::d100();
     if roll < 50 {
         game::Object::potion(loc, Item::Heal, "healing potion")
-    } else {
+    } else if roll < 75 {
         game::Object::scroll(loc, Item::Lightning, "lightning bolt")
+    } else {
+        game::Object::scroll(loc, Item::Confusion, "confusion")
     }
 }
 

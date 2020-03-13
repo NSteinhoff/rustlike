@@ -1,5 +1,5 @@
 use crate::game::{self, Action, Game};
-use crate::{rng, PLAYER};
+use crate::{rng, PLAYER, Direction};
 
 #[derive(Debug)]
 pub enum Ai {
@@ -22,10 +22,11 @@ pub fn turn(id: usize, ai: Ai, game: &Game) -> (game::Turn, Ai) {
 }
 
 /// When the monster is confused
-fn confused(_id: usize, _game: &Game, previous: Box<Ai>, num_turns: i32) -> (game::Turn, Ai) {
-    let turn = vec![];
+fn confused(id: usize, _game: &Game, previous: Box<Ai>, num_turns: i32) -> (game::Turn, Ai) {
+    let mut turn = vec![];
     let ai = if num_turns >= 1 {
         let num_turns = num_turns - 1;
+        turn.push(Action::Move(id, Direction(rng::within(-1, 1), rng::within(-1, 1))));
         Ai::Confused {
             previous,
             num_turns,

@@ -16,6 +16,10 @@ const HEAL_AMOUNT: i32 = 10;
 const LIGHTNING_RANGE: i32 = 3;
 /// Damage of the lightning bolt scroll
 const LIGHTNING_DAMAGE: i32 = 10;
+/// Range of the consuse scroll
+const CONFUSE_RANGE: i32 = 5;
+/// The number of turns a monster is confused
+const CONFUSE_NUM_TURNS: i32 = 5;
 
 pub type Map = Vec<Vec<Tile>>;
 pub type Turn = Vec<Action>;
@@ -35,6 +39,7 @@ pub struct Game {
     pub inventory: Inventory,
     pub fov: FovMap,
     pub map_dimensions: Dimension,
+    pub player_turn: Turn,
 }
 
 impl Game {
@@ -65,6 +70,7 @@ impl Game {
             inventory: vec![],
             fov: FovMap::new(map_width, map_height),
             map_dimensions: map_dimensions,
+            player_turn: vec![],
         };
         game.init_fov();
 
@@ -74,6 +80,7 @@ impl Game {
     pub fn turn(&mut self, player: Turn, ai: Turn) {
         self.turns.push((player, ai));
         self.turn += 1;
+        self.player_turn.clear();
     }
 
     pub fn play(&mut self, turn: &Turn) {
@@ -123,7 +130,7 @@ impl Game {
                     for item in &self.inventory {
                         items.push(&item.name);
                     }
-                    if let Some(choice) = engine.menu("Choose and item to use:", &items, 25) {
+                    if let Some(choice) = self.open_inventory(engine, "Pick item to use:") {
                         (Some(Action::UseItem(PLAYER, choice)), Messages::empty())
                     } else {
                         (None, Messages::empty())
@@ -232,6 +239,14 @@ impl Game {
     pub fn visible(&self, loc: &Location) -> bool {
         let Location(x, y) = *loc;
         self.fov.is_in_fov(x, y)
+    }
+
+    fn open_inventory(&self, engine: &mut Engine, title: &str) -> Option<usize> {
+        let mut items: Vec<&str> = vec![];
+        for item in &self.inventory {
+            items.push(&item.name);
+        }
+        engine.menu(title, &items, 25)
     }
 }
 
@@ -503,6 +518,7 @@ pub struct Movement {
 pub enum Item {
     Heal,
     Lightning,
+    Confusion,
 }
 
 // --------------------------------- Actions ----------------------------------
@@ -663,6 +679,7 @@ fn use_item(id: usize, item_id: usize, game: &mut Game) -> Messages {
         let on_use = match item {
             Heal => cast_heal,
             Lightning => cast_lightning,
+            Confusion => cast_confusion,
         };
         match on_use(id, item_id, game) {
             (UseResult::UsedUp, messages) => {
@@ -883,6 +900,34 @@ fn cast_lightning(id: usize, _item_id: usize, game: &mut Game) -> (UseResult, Me
                 colors::WHITE,
             ),
         )
+    } else {
+        (
+            UseResult::Cancelled,
+            Messages::new("There are no targets in range.", colors::WHITE),
+        )
+    }
+}
+fn cast_confusion(id: usize, _item_id: usize, game: &mut Game) -> (UseResult, Messages) {
+    if let Some(target) = closest_fighter(id, &game.objects, CONFUSE_RANGE) {
+        let t = &mut game.objects[target];
+        if let Some(ai) = t.ai.take() {
+            t.ai = Some(Ai::Confused {
+                previous: Box::new(ai),
+                num_turns: CONFUSE_NUM_TURNS,
+            });
+            (
+                UseResult::UsedUp,
+                Messages::new(
+                    format!("{} looks confused.", direct(&t.name, true)),
+                    colors::WHITE,
+                ),
+            )
+        } else {
+            (
+                UseResult::Cancelled,
+                Messages::new("There are no targets in range.", colors::WHITE),
+            )
+        }
     } else {
         (
             UseResult::Cancelled,
