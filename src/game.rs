@@ -149,13 +149,11 @@ impl Game {
     pub fn ai_turns(&mut self) -> Turn {
         let mut actions = vec![];
         for id in PLAYER + 1..self.objects.len() {
-            if let Some(ai) = self.objects[id].ai.take() {
-                let (turn, new_ai) = ai::turn(id, ai, self);
-                for a in turn {
-                    actions.push(a);
-                }
+            self.objects[id].ai.take().map(|ai| {
+                let (mut turn, new_ai) = ai::turn(id, ai, self);
+                actions.append(&mut turn);
                 self.objects[id].ai = Some(new_ai);
-            }
+            });
         }
         actions
     }
@@ -201,14 +199,14 @@ impl Game {
                 self.objects[id].visible = false;
             }
 
-            if let Some(fighter) = self.objects[id].fighter {
+            self.objects[id].fighter.map(|fighter| {
                 if fighter.health <= 0 {
                     let death_messages = fighter.on_death.call(&mut self.objects[id]);
                     messages.append(death_messages);
                 }
-            }
+            });
 
-            if full_turn {
+            if full_turn && self.objects[id].alive {
                 let _ = regenerate(&mut self.objects[id]);
             }
         }
@@ -558,13 +556,13 @@ pub fn move_or_attack(
 ) -> (Option<Action>, Messages) {
     let destination = destination(&objects[id].loc, &direction);
     if object_blocks(&destination, objects) {
-        match objects
+        objects
             .iter()
             .position(|o| o.loc == destination && o.fighter.is_some())
-        {
-            Some(defender) => (Some(Action::Attack(id, defender)), Messages::empty()),
-            None => (None, Messages::new("Cannot attack that.", colors::WHITE)),
-        }
+            .map_or_else(
+                || (None, Messages::new("Cannot attack that.", colors::WHITE)),
+                |defender| (Some(Action::Attack(id, defender)), Messages::empty()),
+            )
     } else if structure_blocks(&destination, map) {
         (None, Messages::new("It's blocked.", colors::WHITE))
     } else {
@@ -574,18 +572,18 @@ pub fn move_or_attack(
 
 /// Grab an object
 pub fn grab(id: usize, objects: &[Object]) -> (Option<Action>, Messages) {
-    let item_id = objects
+    objects
         .iter()
-        .position(|o| o.loc == objects[id].loc && o.item.is_some());
-
-    if let Some(item_id) = item_id {
-        (Some(Action::PickUp(id, item_id)), Messages::empty())
-    } else {
-        (
-            None,
-            Messages::new("There is nothing here to pick up.", colors::WHITE),
+        .position(|o| o.loc == objects[id].loc && o.item.is_some())
+        .map_or_else(
+            || {
+                (
+                    None,
+                    Messages::new("There is nothing here to pick up.", colors::WHITE),
+                )
+            },
+            |item_id| (Some(Action::PickUp(id, item_id)), Messages::empty()),
         )
-    }
 }
 
 // ------------------------------- Resolution ---------------------------------
@@ -597,50 +595,62 @@ enum UseResult {
 
 /// Attack resolution
 fn attack(attacker: usize, defender: usize, objects: &mut [Object]) -> Messages {
-    let mut messages = Messages::empty();
-    let damage = objects[attacker].fighter.map_or(0, |f| rng::dx(f.power))
-        - objects[defender].fighter.map_or(0, |f| rng::dx(f.defense));
+    let msg = match (attacker, defender) {
+        (PLAYER, d) => format!("You attack {}", direct(&objects[d].name, false)),
+        (a, PLAYER) => format!("{} attacks you", direct(&objects[a].name, true)),
+        (a, d) => format!(
+            "{} attacks {}",
+            direct(&objects[a].name, true),
+            direct(&objects[d].name, false)
+        ),
+    };
 
-    if let Some(fighter) = objects[defender].fighter.as_mut() {
-        let msg = match (attacker, defender) {
-            (PLAYER, d) => format!("You attack {}", direct(&objects[d].name, false)),
-            (a, PLAYER) => format!("{} attacks you", direct(&objects[a].name, true)),
-            (a, d) => format!(
-                "{} attacks {}",
-                direct(&objects[a].name, true),
-                direct(&objects[d].name, false)
-            ),
-        };
-        if damage > 0 {
-            let msg = format!("{} for {} damage!", msg, damage);
-            messages.add(msg, colors::WHITE);
-            fighter.take_damage(damage);
-        } else {
-            let msg = match attacker {
-                PLAYER => format!("{} but do no damage.", msg),
-                _ => format!("{} but does no damage.", msg),
-            };
-            messages.add(msg, colors::WHITE);
-        }
-    }
-    messages
+    let damage = objects[attacker]
+        .fighter
+        .map(|fighter| rng::dx(fighter.power))
+        .and_then(|attack_damage| {
+            objects[defender]
+                .fighter
+                .map(|fighter| attack_damage - rng::dx(fighter.defense))
+        })
+        .unwrap_or(0);
+
+    objects[defender]
+        .fighter
+        .as_mut()
+        .map(|fighter| {
+            if damage > 0 {
+                let msg = format!("{} for {} damage!", msg, damage);
+                fighter.take_damage(damage);
+                Messages::new(msg, colors::WHITE)
+            } else {
+                let msg = match attacker {
+                    PLAYER => format!("{} but do no damage.", msg),
+                    _ => format!("{} but does no damage.", msg),
+                };
+                Messages::new(msg, colors::WHITE)
+            }
+        })
+        .unwrap_or_else(|| Messages::new("Cannot attack that!", colors::WHITE))
 }
 
 /// Move resolution
 fn move_object(id: usize, direction: Direction, map: &Map, objects: &mut [Object]) -> Messages {
     let Direction(dx, dy) = direction;
     let mut messages = Messages::empty();
-    if objects[id]
+    let should_move = objects[id]
         .movement
         .as_ref()
-        .map_or(false, |m| m.speed >= rng::d100())
-    {
-        let _ = move_by(id, direction, map, objects)
+        .map_or(false, |m| m.speed >= rng::d100());
+
+    if should_move {
+        let could_move = move_by(id, direction, map, objects)
             || move_by(id, Direction(dx, 0), map, objects)
             || move_by(id, Direction(0, dy), map, objects);
-    } else {
-        messages.add("The way is blocked!", colors::WHITE);
-    };
+        if !could_move {
+            messages.add("The way is blocked!", colors::WHITE);
+        }
+    }
     messages
 }
 
@@ -674,47 +684,49 @@ fn pickup_item(
 
 /// Use an item
 fn use_item(id: usize, item_id: usize, game: &mut Game) -> Messages {
-    use Item::*;
-    if let Some(item) = &game.inventory[item_id].item {
-        let on_use = match item {
-            Heal => cast_heal,
-            Lightning => cast_lightning,
-            Confusion => cast_confusion,
-        };
-        match on_use(id, item_id, game) {
+    game.inventory[item_id]
+        .item
+        .as_ref()
+        .map(|i| match i {
+            Item::Heal => cast_heal,
+            Item::Lightning => cast_lightning,
+            Item::Confusion => cast_confusion,
+        })
+        .map(|f| f(id, item_id, game))
+        .map(|r| match r {
             (UseResult::UsedUp, messages) => {
                 game.inventory.remove(item_id);
                 messages
             }
             (UseResult::Cancelled, messages) => messages,
-        }
-    } else {
-        Messages::empty()
-    }
+        })
+        .unwrap_or_else(|| Messages::empty())
 }
 
 fn bark(id: usize, objects: &[Object]) -> Messages {
-    let mut messages = Messages::empty();
-    let o = &objects[id];
-    if let Some(Noise { bark, .. }) = &o.noise {
-        messages.add(
-            format!("{} {}s.", indirect(&o.name, true), bark),
-            colors::WHITE,
-        );
-    }
-    messages
+    objects[id]
+        .noise
+        .as_ref()
+        .map(|n| match n {
+            Noise { bark, .. } => Messages::new(
+                format!("{} {}s.", indirect(&objects[id].name, true), bark),
+                colors::WHITE,
+            ),
+        })
+        .unwrap_or_else(|| Messages::empty())
 }
 
 fn mumble(id: usize, objects: &[Object]) -> Messages {
-    let mut messages = Messages::empty();
-    let o = &objects[id];
-    if let Some(Noise { mumble, .. }) = &o.noise {
-        messages.add(
-            format!("{} {}s.", direct(&o.name, true), mumble),
-            colors::WHITE,
-        );
-    }
-    messages
+    objects[id]
+        .noise
+        .as_ref()
+        .map(|n| match n {
+            Noise { mumble, .. } => Messages::new(
+                format!("{} {}s.", indirect(&objects[id].name, true), mumble),
+                colors::WHITE,
+            ),
+        })
+        .unwrap_or_else(|| Messages::empty())
 }
 
 fn kill_player(player: &mut Object) -> Messages {
@@ -745,13 +757,13 @@ fn kill_monster(monster: &mut Object) -> Messages {
 }
 
 fn regenerate(object: &mut Object) -> Messages {
-    if let (true, Some(fighter)) = (object.alive, object.fighter.as_mut()) {
-        let amount = match fighter.health_regen {
+    object.fighter.as_mut().map(|f| {
+        let amount = match f.health_regen {
             p if p <= 1.0 => rng::chance(p) as i32,
             v => v as i32,
         };
-        fighter.heal(amount);
-    }
+        f.heal(amount);
+    });
     Messages::empty()
 }
 
@@ -805,7 +817,8 @@ fn move_by(id: usize, direction: Direction, map: &Map, objects: &mut [Object]) -
 pub fn object_blocks(loc: &Location, objects: &[Object]) -> bool {
     objects
         .iter()
-        .any(|object| object.blocks && &object.loc == loc)
+        .filter(|object| object.blocks)
+        .any(|object| &object.loc == loc)
 }
 
 /// Check if a structure blocks at this position
@@ -837,13 +850,16 @@ fn closest_fighter(id: usize, objects: &[Object], range: i32) -> Option<usize> {
 /// Find a random fighter within range
 fn random_fighter(id: usize, objects: &[Object], range: i32) -> Option<usize> {
     let loc = &objects[id].loc;
-    let target = objects
+    let targets: Vec<usize> = objects
         .iter()
         .enumerate()
         .map(|(i, o)| (i, &o.loc))
-        .position(|(i, l)| i != id && distance(loc, l) <= range as f32);
-
-    target.filter(|&t| objects[t].fighter.is_some())
+        .filter(|(i, _)| *i != id)
+        .filter(|(_, l)| distance(loc, l) <= range as f32)
+        .map(|(i, _)| i)
+        .filter(|&t| objects[t].fighter.is_some())
+        .collect();
+    rng::choose(&targets).cloned()
 }
 
 /// Check if a place on the map is blocked
@@ -870,68 +886,79 @@ fn direct(it: &str, upper: bool) -> String {
 
 // --------------------------- Items and Abilities ----------------------------
 fn cast_heal(id: usize, _item_id: usize, game: &mut Game) -> (UseResult, Messages) {
-    let o = &mut game.objects[id];
-    if let Some(fighter) = o.fighter.as_mut() {
-        if fighter.health == fighter.max_health {
+    game.objects[id]
+        .fighter
+        .as_mut()
+        .map(|fighter| {
+            if fighter.health == fighter.max_health {
+                (
+                    UseResult::Cancelled,
+                    Messages::new("Already at full health!", colors::WHITE),
+                )
+            } else {
+                fighter.heal(HEAL_AMOUNT);
+                (UseResult::UsedUp, Messages::new("Healed!", colors::WHITE))
+            }
+        })
+        .unwrap_or_else(|| {
             (
                 UseResult::Cancelled,
-                Messages::new("Already at full health!", colors::WHITE),
+                Messages::new("Only fighters can drink!", colors::WHITE),
             )
-        } else {
-            fighter.heal(HEAL_AMOUNT);
-            (UseResult::UsedUp, Messages::new("Healed!", colors::WHITE))
-        }
-    } else {
-        (
-            UseResult::Cancelled,
-            Messages::new("Only fighters can drink!", colors::WHITE),
-        )
-    }
+        })
 }
+
 fn cast_lightning(id: usize, _item_id: usize, game: &mut Game) -> (UseResult, Messages) {
-    if let Some(target) = closest_fighter(id, &game.objects, LIGHTNING_RANGE) {
-        let t = &mut game.objects[target];
-        let mut f = t.fighter.as_mut().expect("Target must be a fighter");
-        f.health -= LIGHTNING_DAMAGE;
-        (
-            UseResult::UsedUp,
-            Messages::new(
-                format!("You zap {} ", direct(&t.name, false)),
-                colors::WHITE,
-            ),
-        )
-    } else {
-        (
-            UseResult::Cancelled,
-            Messages::new("There are no targets in range.", colors::WHITE),
-        )
-    }
+    closest_fighter(id, &game.objects, LIGHTNING_RANGE)
+        .map(|target| {
+            game.objects[target]
+                .fighter
+                .as_mut()
+                .expect("Target must be a fighter")
+                .take_damage(LIGHTNING_DAMAGE);
+            (
+                UseResult::UsedUp,
+                Messages::new(
+                    format!("You zap {} ", direct(&game.objects[target].name, false)),
+                    colors::WHITE,
+                ),
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                UseResult::Cancelled,
+                Messages::new("There are no targets in range.", colors::WHITE),
+            )
+        })
 }
+
 fn cast_confusion(id: usize, _item_id: usize, game: &mut Game) -> (UseResult, Messages) {
-    if let Some(target) = closest_fighter(id, &game.objects, CONFUSE_RANGE) {
-        let t = &mut game.objects[target];
-        if let Some(ai) = t.ai.take() {
-            t.ai = Some(Ai::Confused {
+    closest_fighter(id, &game.objects, CONFUSE_RANGE)
+        .map(|target| {
+            let ai = game.objects[target]
+                .ai
+                .take()
+                .expect("Fighters must have AI!");
+
+            game.objects[target].ai = Some(Ai::Confused {
                 previous: Box::new(ai),
                 num_turns: CONFUSE_NUM_TURNS,
             });
             (
                 UseResult::UsedUp,
                 Messages::new(
-                    format!("{} looks confused.", direct(&t.name, true)),
+                    format!(
+                        "{} looks confused.",
+                        direct(&game.objects[target].name, true)
+                    ),
                     colors::WHITE,
                 ),
             )
-        } else {
+        })
+        .unwrap_or_else(|| {
             (
                 UseResult::Cancelled,
                 Messages::new("There are no targets in range.", colors::WHITE),
             )
-        }
-    } else {
-        (
-            UseResult::Cancelled,
-            Messages::new("There are no targets in range.", colors::WHITE),
-        )
-    }
+        })
 }

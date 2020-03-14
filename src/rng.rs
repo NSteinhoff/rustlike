@@ -9,6 +9,10 @@ pub fn chance(p: f32) -> bool {
     rand::thread_rng().next_f32() <= p
 }
 
+pub fn choose<T>(values: &[T]) -> Option<&T> {
+    rand::thread_rng().choose(values)
+}
+
 /// Roll custom dice
 pub fn dx(x: i32) -> i32 {
     match x {
