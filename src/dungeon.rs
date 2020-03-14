@@ -2,20 +2,20 @@
 use std::cmp;
 
 // Internal
+use crate::game::{Item, Map, Object, Tile};
+use crate::PLAYER;
 use crate::{game, rng};
-use crate::{PLAYER};
 use crate::{Dimension, Location};
-use crate::game::{Object, Map, Tile, Item};
 
 /// Create a new map
 pub fn make_map(
-        objects: &mut Vec<Object>,
-        map_dimension: Dimension,
-        room_dimensions: Dimension,
-        max_rooms: i32,
-        max_room_monsters: i32,
-        max_room_items: i32,
-    ) -> Map {
+    objects: &mut Vec<Object>,
+    map_dimension: Dimension,
+    room_dimensions: Dimension,
+    max_rooms: i32,
+    max_room_monsters: i32,
+    max_room_items: i32,
+) -> Map {
     // fill map with "unblocked" tiles
     let Dimension(width, height) = map_dimension;
     let mut map = vec![vec![Tile::wall(); height as usize]; width as usize];
@@ -126,7 +126,6 @@ fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
     }
 }
 
-
 // -------------------------------- Monsters ----------------------------------
 
 /// Return a random position inside a room
@@ -163,7 +162,12 @@ fn create_item(room: Rect) -> Object {
 }
 
 /// Place some monsters in random locations in a room
-fn place_objects(room: Rect, objects: &mut Vec<Object>, max_room_monsters: i32, max_room_items: i32) {
+fn place_objects(
+    room: Rect,
+    objects: &mut Vec<Object>,
+    max_room_monsters: i32,
+    max_room_items: i32,
+) {
     // choose a random number of monsters to place in this room
     for _ in 0..rng::within(0, max_room_monsters) {
         let monster = create_monster(room);

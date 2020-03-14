@@ -224,7 +224,8 @@ impl Engine {
             .iter()
             .rev()
             .enumerate()
-            .take(self.ui.con.height() as usize - y as usize - 1)       // Only as many as there is space for
+            .take(self.ui.con.height() as usize - y as usize - 1)
+        // Only as many as there is space for
         {
             let o = &game.objects[id];
             if game.visible(&o.loc) {

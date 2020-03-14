@@ -1,14 +1,60 @@
 #![allow(dead_code)]
+//! Architecture
+//! ============
+//!
+//! Game Loop
+//! ---------
+//!
+//!     +---> P ---> A ---> I ---> U ---+
+//!     |                               |
+//!     ^          GAME LOOP            v
+//!     |                               |
+//!     +---------| running? |----------+
+//!
+//! * `Present` the scene to the user
+//! * `Accept` input from the user.
+//! * `Interpret` the input of the user and determine what should happen
+//!   and determines the next scene
+//! * `Update` the game state based on the interpretation
+//!
+//! Scenes
+//! ------
+//! The game will present different scenes to the player:
+//!
+//! * Main menu
+//! * Game world
+//! * Level up screen
+//! * Reward / path selection screen
+//!
+//! Scenes are pushed onto the `SceneStack` based on the results
+//! of interpreting the player input. When a scene exits, it is popped
+//! off the stack. A scene can also push another scene onto the stack,
+//! which would then need to exit, before returning back to the original
+//! scene.
+//!
+//!     |> Main Menu ! START
+//!     => Main Menu -> Game World ! ATTACK
+//!     => Main Menu -> Game World ! LEVEL UP
+//!     => Main Menu -> Game World -> Level Up ! EXIT
+//!     => Main Menu -> Game World ! MOVE
+//!     => Main Menu -> Game World ! NEXT LEVEL
+//!     => Main Menu -> Game World -> Choose Path ! OPEN INVENTORY
+//!     => Main Menu -> Game World -> Choose Path -> Inventory ! EXIT
+//!     => Main Menu -> Game World -> Choose Path -> ! EXIT
+//!     => Main Menu -> Game World ! MOVE
+//!     => Main Menu -> Game World ! EXIT
+//!     => Main Menu ! EXIT
+//!     <| OS
+
 // Internal
 pub mod ai;
+pub mod dungeon;
 pub mod engine;
 pub mod game;
 pub mod rng;
-pub mod dungeon;
 
-use crate::engine::{Engine, Command, colors};
-use crate::game::{Game, Object, Messages, Action};
-
+use crate::engine::{colors, Command, Engine};
+use crate::game::{Action, Game, Messages, Object};
 
 /// Width of the game screen in number of tiles
 const SCREEN_WIDTH: i32 = 1920 / 10 / 2;
@@ -42,15 +88,51 @@ pub struct Location(pub i32, pub i32);
 pub struct Direction(pub i32, pub i32);
 #[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub struct Dimension(pub i32, pub i32);
+/// Presentation handler
+type Present = fn(&mut Engine, &Game);
+/// Input handler
+type Accept = fn(&mut Engine) -> Command;
+/// Input interpretation handler
+type Interpret = fn(&mut Engine, &mut Game, Command) -> (Option<Action>, Transition);
+/// Game state update handler
+type Update = fn(&mut Game, Action);
 
+/// Scene struct to hold the handler functions for the game loop
+///
+/// Each scene can define how input is accepted and interpreted, how
+/// the game world is updated and how it's presented.
+struct Scene {
+    accept: Accept,
+    present: Present,
+    interpret: Interpret,
+    update: Update,
+}
+
+impl Scene {
+    /// The main game screen with the map of the dungeon
+    fn main() -> Self {
+        Scene {
+            present: main_render,
+            accept: |engine: &mut Engine| engine.next_command(),
+            interpret: main_interpret,
+            update: main_update,
+        }
+    }
+}
+
+/// Scene transitions
+///
+/// Exit: Exit the current scene
+/// Continue: Remain in the current scene
+/// Next: Move to the next scene
+enum Transition {
+    Exit,
+    Continue,
+    Next(Scene),
+}
 
 /// Main entry point
 fn main() {
-    let present = main_render;
-    let accept = main_accept;
-    let interpret = main_interpret;
-    let update = main_update;
-
     // Create a player and an NPC
     let player = Object::player(Location(0, 0), "Rodney");
 
@@ -63,40 +145,45 @@ fn main() {
         MAX_ROOM_MONSTERS,
         MAX_ROOM_ITEMS,
     );
-    game.messages.add("You've stumbled into some very rusty caves. Prepare yourself.", colors::GREEN);
+    game.messages.add(
+        "You've stumbled into some very rusty caves. Prepare yourself.",
+        colors::GREEN,
+    );
 
     // Create the game engine
-    let mut engine = Engine::new(
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
-        LIMIT_FPS,
-    );
+    let mut engine = Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS);
+
+    let mut scene = Scene::main();
 
     println!("Number of monsters: {}", game.objects.len() - 1);
     println!("--- [{}] ---", game.turn + 1);
-    game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
+    game.messages
+        .add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
     let messages = game.update(false);
     game.messages.append(messages);
 
     while engine.running() {
-        present(&mut engine, &game);
-        let command = accept(&mut engine);
-        let action = interpret(&mut engine, &mut game, command);
-        if let Some(action) = action {
-            update(&mut game, action);
+        (scene.present)(&mut engine, &game);
+        let command = (scene.accept)(&mut engine);
+        let (action, transition) = (scene.interpret)(&mut engine, &mut game, command);
+        action.map(|action| (scene.update)(&mut game, action));
+        match transition {
+            Transition::Continue => {},
+            Transition::Exit => {},
+            Transition::Next(s) => scene = s
         }
     }
-}
-
-fn main_accept(engine: &mut Engine) -> Command {
-    engine.next_command()
 }
 
 fn main_render(engine: &mut Engine, game: &Game) {
     engine.render(game);
 }
 
-fn main_interpret(engine: &mut Engine, game: &mut Game, command: Command) -> Option<Action> {
+fn main_interpret(
+    engine: &mut Engine,
+    game: &mut Game,
+    command: Command,
+) -> (Option<Action>, Transition) {
     let (action, messages) = match command {
         // System
         Command::Nothing => (None, Messages::empty()),
@@ -107,13 +194,13 @@ fn main_interpret(engine: &mut Engine, game: &mut Game, command: Command) -> Opt
         Command::Exit => {
             engine.exit();
             println!("Game turns: {}", game.turn);
-            return None;
+            return (None, Transition::Exit);
         }
         // Handle the remaining commands as player actions
         command => game.player_turn(&command, engine),
     };
     game.messages.append(messages);
-    action
+    (action, Transition::Continue)
 }
 
 fn main_update(game: &mut Game, action: Action) {
@@ -140,6 +227,7 @@ fn main_update(game: &mut Game, action: Action) {
 
         // Start the turn
         println!("--- [{}] ---", game.turn + 1);
-        game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
+        game.messages
+            .add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
     }
 }
