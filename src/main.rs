@@ -133,6 +133,9 @@ enum Transition {
 
 /// Main entry point
 fn main() {
+    let mut scenes: Vec<Scene> = vec![];
+    scenes.push(Scene::main());
+
     // Create a player and an NPC
     let player = Object::player(Location(0, 0), "Rodney");
 
@@ -153,8 +156,6 @@ fn main() {
     // Create the game engine
     let mut engine = Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS);
 
-    let mut scene = Scene::main();
-
     println!("Number of monsters: {}", game.objects.len() - 1);
     println!("--- [{}] ---", game.turn + 1);
     game.messages
@@ -163,14 +164,25 @@ fn main() {
     game.messages.append(messages);
 
     while engine.running() {
-        (scene.present)(&mut engine, &game);
-        let command = (scene.accept)(&mut engine);
-        let (action, transition) = (scene.interpret)(&mut engine, &mut game, command);
-        action.map(|action| (scene.update)(&mut game, action));
-        match transition {
-            Transition::Continue => {},
-            Transition::Exit => {},
-            Transition::Next(s) => scene = s
+        scenes.last().map(|scene| {
+            (scene.present)(&mut engine, &game);
+            let command = (scene.accept)(&mut engine);
+            let (action, transition) = (scene.interpret)(&mut engine, &mut game, command);
+            action.map(|action| (scene.update)(&mut game, action));
+            transition
+        })
+        .map(|transition| {
+            match transition {
+                Transition::Continue => {},
+                Transition::Exit => { scenes.pop(); },
+                Transition::Next(s) => scenes.push(s),
+            }
+        });
+
+        println!("Scene Stack: {}", scenes.len());
+        if scenes.is_empty() {
+            engine.exit();
+            println!("Game turns: {}", game.turn);
         }
     }
 }
@@ -184,23 +196,24 @@ fn main_interpret(
     game: &mut Game,
     command: Command,
 ) -> (Option<Action>, Transition) {
-    let (action, messages) = match command {
+    let (action, messages, transition) = match command {
         // System
-        Command::Nothing => (None, Messages::empty()),
+        Command::Nothing => (None, Messages::empty(), Transition::Continue),
         Command::ToggleFullScreen => {
             engine.toggle_fullscreen();
-            (None, Messages::new("Fullscreen toggled", colors::WHITE))
+            (None, Messages::new("Fullscreen toggled", colors::WHITE), Transition::Continue)
         }
         Command::Exit => {
-            engine.exit();
-            println!("Game turns: {}", game.turn);
-            return (None, Transition::Exit);
+            (None, Messages::new("Ok, bye!", colors::WHITE), Transition::Exit)
         }
         // Handle the remaining commands as player actions
-        command => game.player_turn(&command, engine),
+        command => {
+            let (a, m) = game.player_turn(&command, engine);
+            (a, m, Transition::Continue)
+        }
     };
     game.messages.append(messages);
-    (action, Transition::Continue)
+    (action, transition)
 }
 
 fn main_update(game: &mut Game, action: Action) {
