@@ -346,6 +346,39 @@ impl Engine {
             None
         }
     }
+
+    pub fn render_main_menu(&mut self) {
+        let (w, h) = (self.root.width(), self.root.height());
+        let mut con = Offscreen::new(w, h);
+        con.set_default_background(colors::BLACK);
+        con.set_default_foreground(colors::WHITE);
+
+        con.print_rect_ex(
+            w / 2,
+            h / 4,
+            w - 2,
+            h - 2,
+            BackgroundFlag::Set,
+            TextAlignment::Center,
+            format!(
+                "{}\n\n{}\n\n\n\n\n{}",
+                "* Rustlike *",
+                "A short adventure in game development.",
+                "Press any key to continue. ESC to exit.",
+            )
+        );
+
+        console::blit(
+            &con,
+            (0, 0),
+            (w, h),
+            &mut self.root,
+            (0, 0),
+            1.0,
+            1.0,
+        );
+        self.root.flush();
+    }
 }
 
 fn translate(

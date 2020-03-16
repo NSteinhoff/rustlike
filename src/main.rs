@@ -112,10 +112,23 @@ impl Scene {
     /// The main game screen with the map of the dungeon
     fn main() -> Self {
         Scene {
-            present: main_render,
+            present: |e, g| e.render(g),
             accept: |engine: &mut Engine| engine.next_command(),
             interpret: main_interpret,
             update: main_update,
+        }
+    }
+
+    /// The main menu
+    fn main_menu() -> Self {
+        Scene {
+            present: |e, _g| e.render_main_menu(),
+            accept: |engine: &mut Engine| engine.next_command(),
+            interpret: |_e, _g, c| match c {
+                Command::Exit => (None, Transition::Exit),
+                _ => (None, Transition::Next(Scene::main())),
+            },
+            update: |_g, _a| {},
         }
     }
 }
@@ -134,7 +147,7 @@ enum Transition {
 /// Main entry point
 fn main() {
     let mut scenes: Vec<Scene> = vec![];
-    scenes.push(Scene::main());
+    scenes.push(Scene::main_menu());
 
     // Create a player and an NPC
     let player = Object::player(Location(0, 0), "Rodney");
@@ -158,8 +171,7 @@ fn main() {
 
     println!("Number of monsters: {}", game.objects.len() - 1);
     println!("--- [{}] ---", game.turn + 1);
-    game.messages
-        .add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
+    // game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
     let messages = game.update(false);
     game.messages.append(messages);
 
@@ -185,10 +197,6 @@ fn main() {
             println!("Game turns: {}", game.turn);
         }
     }
-}
-
-fn main_render(engine: &mut Engine, game: &Game) {
-    engine.render(game);
 }
 
 fn main_interpret(
@@ -240,7 +248,6 @@ fn main_update(game: &mut Game, action: Action) {
 
         // Start the turn
         println!("--- [{}] ---", game.turn + 1);
-        game.messages
-            .add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
+        // game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
     }
 }
