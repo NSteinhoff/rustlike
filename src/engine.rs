@@ -8,7 +8,7 @@ use tcod::console::{
 use tcod::input;
 pub use tcod::map::{FovAlgorithm, Map as FovMap}; // Re-exports only
 
-use crate::game::{self, Game, Messages, Object, Tile};
+use crate::game::{self, Game, Messages, Object, Tile, Action};
 use crate::{Dimension, Location, PLAYER};
 
 /// Color used for unexplored areas
@@ -589,4 +589,29 @@ struct Bar {
     maximum: i32,
     color: Color,
     background: Color,
+}
+
+/// Scene transitions
+///
+/// Exit: Exit the current scene
+/// Continue: Remain in the current scene
+/// Next: Move to the next scene
+pub enum Transition {
+    Exit,
+    Continue,
+    Next(Box<dyn Scene>),
+}
+
+pub trait Scene {
+    /// Update the game state
+    fn update(&self, game: &mut Game, action: Action);
+
+    /// Present the game state
+    fn present(&self, engine: &mut Engine, game: &Game);
+
+    /// Accept input from the player
+    fn accept(&self, engine: &mut Engine) -> Command;
+
+    /// Interpret command
+    fn interpret(&self, engine: &mut Engine, game: &mut Game, cmd: Command) -> (Option<Action>, Transition);
 }

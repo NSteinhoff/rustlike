@@ -53,7 +53,7 @@ pub mod engine;
 pub mod game;
 pub mod rng;
 
-use crate::engine::{colors, Command, Engine};
+use crate::engine::{colors, Command, Engine, Scene, Transition};
 use crate::game::{Action, Game, Messages, Object};
 
 /// Width of the game screen in number of tiles
@@ -88,66 +88,111 @@ pub struct Location(pub i32, pub i32);
 pub struct Direction(pub i32, pub i32);
 #[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub struct Dimension(pub i32, pub i32);
-/// Presentation handler
-type Present = fn(&mut Engine, &Game);
-/// Input handler
-type Accept = fn(&mut Engine) -> Command;
-/// Input interpretation handler
-type Interpret = fn(&mut Engine, &mut Game, Command) -> (Option<Action>, Transition);
-/// Game state update handler
-type Update = fn(&mut Game, Action);
 
-/// Scene struct to hold the handler functions for the game loop
-///
-/// Each scene can define how input is accepted and interpreted, how
-/// the game world is updated and how it's presented.
-struct Scene {
-    accept: Accept,
-    present: Present,
-    interpret: Interpret,
-    update: Update,
-}
 
-impl Scene {
-    /// The main game screen with the map of the dungeon
-    fn main() -> Self {
-        Scene {
-            present: |e, g| e.render(g),
-            accept: |engine: &mut Engine| engine.next_command(),
-            interpret: main_interpret,
-            update: main_update,
+struct Main {}
+impl Scene for Main {
+    /// Update the game state
+    fn update(&self, game: &mut Game, action: Action) {
+        // First play the player turn
+        game.player_turn.push(action);
+        game.play(&vec![action]);
+
+        let messages = game.update(false);
+        game.messages.append(messages);
+
+        // Some actions don't consume a turn
+        if action.took_turn() {
+            // Calculate the reaction of the AI and play
+            // the AI turn.
+            let ai_turns = game.ai_turns();
+            game.play(&ai_turns);
+
+            let messages = game.update(true);
+            game.messages.append(messages);
+
+            // Record the turn
+            println!("{}: {:?}", game.turn + 1, (&game.player_turn, &ai_turns));
+            game.turn(game.player_turn.clone(), ai_turns);
+
+            // Start the turn
+            println!("--- [{}] ---", game.turn + 1);
+            // game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
         }
     }
 
-    /// The main menu
-    fn main_menu() -> Self {
-        Scene {
-            present: |e, _g| e.render_main_menu(),
-            accept: |engine: &mut Engine| engine.next_command(),
-            interpret: |_e, _g, c| match c {
-                Command::Exit => (None, Transition::Exit),
-                _ => (None, Transition::Next(Scene::main())),
-            },
-            update: |_g, _a| {},
+    /// Present the game state
+    fn present(&self, engine: &mut Engine, game: &Game) {
+        engine.render(game)
+    }
+
+    /// Accept input from the player
+    fn accept(&self, engine: &mut Engine) -> Command {
+        engine.next_command()
+    }
+
+    /// Interpret command
+    fn interpret(
+        &self,
+        engine: &mut Engine,
+        game: &mut Game,
+        command: Command,
+    ) -> (Option<Action>, Transition) {
+        let (action, messages, transition) = match command {
+            // System
+            Command::Nothing => (None, Messages::empty(), Transition::Continue),
+            Command::ToggleFullScreen => {
+                engine.toggle_fullscreen();
+                (None, Messages::new("Fullscreen toggled", colors::WHITE), Transition::Continue)
+            }
+            Command::Exit => {
+                (None, Messages::new("Ok, bye!", colors::WHITE), Transition::Exit)
+            }
+            // Handle the remaining commands as player actions
+            command => {
+                let (a, m) = game.player_turn(&command, engine);
+                (a, m, Transition::Continue)
+            }
+        };
+        game.messages.append(messages);
+        (action, transition)
+    }
+}
+
+struct MainMenu {}
+impl Scene for MainMenu {
+    /// Update the game state
+    fn update(&self, _game: &mut Game, _action: Action) {}
+
+    /// Present the game state
+    fn present(&self, engine: &mut Engine, _game: &Game) {
+        engine.render_main_menu()
+    }
+
+    /// Accept input from the player
+    fn accept(&self, engine: &mut Engine) -> Command {
+        engine.next_command()
+    }
+
+    /// Interpret command
+    fn interpret(
+        &self,
+        _engine: &mut Engine,
+        _game: &mut Game,
+        command: Command,
+    ) -> (Option<Action>, Transition) {
+        match command {
+            Command::Exit => (None, Transition::Exit),
+            _ => (None, Transition::Next(Box::new(Main {}))),
         }
     }
 }
 
-/// Scene transitions
-///
-/// Exit: Exit the current scene
-/// Continue: Remain in the current scene
-/// Next: Move to the next scene
-enum Transition {
-    Exit,
-    Continue,
-    Next(Scene),
-}
 
 /// Main entry point
 fn main() {
-    let mut scenes: Vec<Scene> = vec![];
-    scenes.push(Scene::main_menu());
+    let mut scenes: Vec<Box<dyn Scene>> = vec![];
+    scenes.push(Box::new(MainMenu {}));
 
     // Create a player and an NPC
     let player = Object::player(Location(0, 0), "Rodney");
@@ -177,10 +222,10 @@ fn main() {
 
     while engine.running() {
         scenes.last().map(|scene| {
-            (scene.present)(&mut engine, &game);
-            let command = (scene.accept)(&mut engine);
-            let (action, transition) = (scene.interpret)(&mut engine, &mut game, command);
-            action.map(|action| (scene.update)(&mut game, action));
+            scene.present(&mut engine, &game);
+            let command = scene.accept(&mut engine);
+            let (action, transition) = scene.interpret(&mut engine, &mut game, command);
+            action.map(|action| scene.update(&mut game, action));
             transition
         })
         .map(|transition| {
@@ -196,58 +241,5 @@ fn main() {
             engine.exit();
             println!("Game turns: {}", game.turn);
         }
-    }
-}
-
-fn main_interpret(
-    engine: &mut Engine,
-    game: &mut Game,
-    command: Command,
-) -> (Option<Action>, Transition) {
-    let (action, messages, transition) = match command {
-        // System
-        Command::Nothing => (None, Messages::empty(), Transition::Continue),
-        Command::ToggleFullScreen => {
-            engine.toggle_fullscreen();
-            (None, Messages::new("Fullscreen toggled", colors::WHITE), Transition::Continue)
-        }
-        Command::Exit => {
-            (None, Messages::new("Ok, bye!", colors::WHITE), Transition::Exit)
-        }
-        // Handle the remaining commands as player actions
-        command => {
-            let (a, m) = game.player_turn(&command, engine);
-            (a, m, Transition::Continue)
-        }
-    };
-    game.messages.append(messages);
-    (action, transition)
-}
-
-fn main_update(game: &mut Game, action: Action) {
-    // First play the player turn
-    game.player_turn.push(action);
-    game.play(&vec![action]);
-
-    let messages = game.update(false);
-    game.messages.append(messages);
-
-    // Some actions don't consume a turn
-    if action.took_turn() {
-        // Calculate the reaction of the AI and play
-        // the AI turn.
-        let ai_turns = game.ai_turns();
-        game.play(&ai_turns);
-
-        let messages = game.update(true);
-        game.messages.append(messages);
-
-        // Record the turn
-        println!("{}: {:?}", game.turn + 1, (&game.player_turn, &ai_turns));
-        game.turn(game.player_turn.clone(), ai_turns);
-
-        // Start the turn
-        println!("--- [{}] ---", game.turn + 1);
-        // game.messages.add(format!("--- [{}] ---", game.turn + 1), colors::WHITE);
     }
 }
