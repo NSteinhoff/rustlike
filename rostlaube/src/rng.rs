@@ -1,14 +1,17 @@
 use rand::Rng;
+pub use rand::random;
 
 /// Random number within an inclusive [min:max] range
 pub fn within(min: i32, max: i32) -> i32 {
     rand::thread_rng().gen_range(min, max + 1)
 }
 
+/// Return true with probability p
 pub fn chance(p: f32) -> bool {
     rand::thread_rng().next_f32() <= p
 }
 
+/// Choose a random value from the input slice
 pub fn choose<T>(values: &[T]) -> Option<&T> {
     rand::thread_rng().choose(values)
 }

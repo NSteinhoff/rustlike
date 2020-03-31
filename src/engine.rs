@@ -1,14 +1,15 @@
-use std::cmp;
+pub use rostlaube::colors::{self, Color};
 
-pub use tcod::colors::{self, Color};
-use tcod::console;
-use tcod::console::{
+use rostlaube::console;
+use rostlaube::input;
+use rostlaube::geometry;
+use rostlaube::console::{
     BackgroundFlag, Console, FontLayout, FontType, Offscreen, Root, TextAlignment,
 };
-use tcod::input;
-pub use tcod::map::{FovAlgorithm, Map as FovMap}; // Re-exports only
+pub use rostlaube::map::{FovAlgorithm, Map as FovMap};
+use rostlaube::ui::{Draw, Window, Bar}; // Re-exports only
 
-use crate::game::{self, Game, Messages, Object, Tile, Action};
+use crate::game::{self, Action, Game, Messages, Object, Tile};
 use crate::{Dimension, Location, PLAYER};
 
 /// Color used for unexplored areas
@@ -27,11 +28,6 @@ const PANEL_HEIGHT: i32 = 10;
 /// The width of the sidebar
 const SIDEBAR_PCT: i32 = 30;
 
-struct Window {
-    con: Offscreen,
-    pos: (i32, i32),
-}
-
 pub struct Engine {
     running: bool,
     root: Root,
@@ -43,7 +39,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(screen_width: i32, screen_height: i32, limit_fps: i32) -> Self {
-        tcod::system::set_fps(limit_fps);
+        rostlaube::system::set_fps(limit_fps);
         let mut root = Root::initializer()
             .font("src/consolas12x12.png", FontLayout::Tcod)
             .font_type(FontType::Greyscale)
@@ -137,7 +133,7 @@ impl Engine {
         for y_map in 0..map_height {
             for x_map in 0..map_width {
                 let loc = &Location(x_map, y_map);
-                let view_loc = translate(source, target, loc, focus);
+                let view_loc = geometry::translate(source, target, loc, focus);
                 if let Some(Location(x, y)) = view_loc {
                     let tile = &game.map[x_map as usize][y_map as usize];
                     let (color, char) = match (tile.explored, tile.visible, tile) {
@@ -181,8 +177,8 @@ impl Engine {
 
         to_draw.sort_by(|a, b| a.blocks.cmp(&b.blocks));
         for object in to_draw {
-            if let Some(loc) = translate(source, target, &object.loc, focus) {
-                draw(object, &mut self.view.con, &loc);
+            if let Some(loc) = geometry::translate(source, target, &object.loc, focus) {
+                rostlaube::draw(object, &mut self.view.con, &loc);
             }
         }
 
@@ -213,7 +209,7 @@ impl Engine {
                 width: self.ui.con.width(),
                 name: String::from("HP"),
             };
-            draw(&health_bar, &mut self.ui.con, &Location(0, 0));
+            rostlaube::draw(&health_bar, &mut self.ui.con, &Location(0, 0));
         }
 
         self.ui.con.set_default_background(colors::BLACK);
@@ -274,7 +270,7 @@ impl Engine {
         self.messages.con.set_default_background(colors::BLACK);
         self.messages.con.clear();
 
-        draw(messages, &mut self.messages.con, &Location(0, 0));
+        rostlaube::draw(messages, &mut self.messages.con, &Location(0, 0));
 
         console::blit(
             &self.messages.con,
@@ -365,53 +361,16 @@ impl Engine {
                 "* Rustlike *",
                 "A short adventure in game development.",
                 "Press any key to continue. ESC to exit.",
-            )
+            ),
         );
 
-        console::blit(
-            &con,
-            (0, 0),
-            (w, h),
-            &mut self.root,
-            (0, 0),
-            1.0,
-            1.0,
-        );
+        console::blit(&con, (0, 0), (w, h), &mut self.root, (0, 0), 1.0, 1.0);
         self.root.flush();
     }
 }
 
-fn translate(
-    source: &Dimension,
-    target: &Dimension,
-    loc: &Location,
-    focus: &Location,
-) -> Option<Location> {
-    let Dimension(width, height) = target;
-    let Dimension(map_width, map_height) = source;
-
-    let center_x = width / 2 + 1;
-    let center_y = height / 2 + 1;
-
-    let Location(x_focus, y_focus) = focus;
-    let Location(x_map, y_map) = loc;
-
-    let rel_x = x_map - x_focus;
-    let rel_y = y_map - y_focus;
-
-    let view_x = center_x + rel_x;
-    let view_y = center_y + rel_y;
-
-    if view_x >= 0 && view_x < *map_width && view_y >= 0 && view_y < *map_height {
-        let view_loc = Location(view_x, view_y);
-        Some(view_loc)
-    } else {
-        None
-    }
-}
-
 fn get_key_command(key: input::Key) -> Command {
-    use tcod::input::{Key, KeyCode::Char, KeyCode::Enter, KeyCode::Escape};
+    use rostlaube::input::{Key, KeyCode::Char, KeyCode::Enter, KeyCode::Escape};
     use Command::*;
     match key {
         Key { code: Escape, .. } => Exit,
@@ -479,52 +438,12 @@ fn get_key_command(key: input::Key) -> Command {
     }
 }
 
-/// Draw an object on the view
-fn draw(item: &impl Draw, layer: &mut Offscreen, loc: &Location) {
-    item.draw(layer, loc)
-}
-
-trait Draw {
-    fn draw(&self, layer: &mut Offscreen, loc: &Location);
-}
-
 impl Draw for Object {
     /// Draw an object on the view
     fn draw(&self, layer: &mut Offscreen, loc: &Location) {
         let Location(x, y) = *loc;
         layer.set_default_foreground(self.color);
         layer.put_char(x, y, self.char, BackgroundFlag::None);
-    }
-}
-
-impl Draw for Bar {
-    fn draw(&self, layer: &mut Offscreen, _loc: &Location) {
-        // Make sure we don't exceed the width of the console
-        let width = cmp::min(layer.width(), self.width) - self.x;
-
-        let mut con = Offscreen::new(width, 1);
-
-        con.set_default_background(self.background);
-
-        con.rect(0, 0, width, 1, false, BackgroundFlag::Set);
-
-        con.set_default_background(self.color);
-        let pct_filled = self.current as f32 / self.maximum as f32 * width as f32;
-        let filled = pct_filled as i32;
-        if filled > 0 {
-            con.rect(0, 0, filled, 1, false, BackgroundFlag::Set);
-        }
-
-        con.set_default_foreground(colors::BLACK);
-        con.print_ex(
-            2, // Draw it on the right side of the bar
-            0,
-            BackgroundFlag::None,
-            TextAlignment::Left,
-            &format!("{}: {}/{}", self.name, self.current, self.maximum),
-        );
-
-        console::blit(&con, (0, 0), (width, 1), layer, (self.x, self.y), 1.0, 1.0);
     }
 }
 
@@ -579,18 +498,6 @@ pub enum Command {
     Grab,
 }
 
-#[derive(Debug)]
-struct Bar {
-    x: i32,
-    y: i32,
-    width: i32,
-    name: String,
-    current: i32,
-    maximum: i32,
-    color: Color,
-    background: Color,
-}
-
 /// Scene transitions
 ///
 /// Exit: Exit the current scene
@@ -613,5 +520,10 @@ pub trait Scene {
     fn accept(&self, engine: &mut Engine) -> Command;
 
     /// Interpret command
-    fn interpret(&self, engine: &mut Engine, game: &mut Game, cmd: Command) -> (Option<Action>, Transition);
+    fn interpret(
+        &self,
+        engine: &mut Engine,
+        game: &mut Game,
+        cmd: Command,
+    ) -> (Option<Action>, Transition);
 }

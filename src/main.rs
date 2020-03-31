@@ -46,14 +46,16 @@
 //!     => Main Menu ! EXIT
 //!     <| OS
 
+pub use rostlaube::rng;
+pub use rostlaube::geometry::{Location, Direction, Dimension};
+
 // Internal
 pub mod ai;
 pub mod dungeon;
 pub mod engine;
 pub mod game;
-pub mod rng;
 
-use crate::engine::{colors, Command, Engine, Scene, Transition};
+use crate::engine::{colors, Engine, Command, Scene, Transition};
 use crate::game::{Action, Game, Messages, Object};
 
 /// Width of the game screen in number of tiles
@@ -81,13 +83,6 @@ const MAX_ROOM_ITEMS: i32 = 2;
 
 /// Index of player in vector of objects
 const PLAYER: usize = 0; // The player will always be the first object
-
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
-pub struct Location(pub i32, pub i32);
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
-pub struct Direction(pub i32, pub i32);
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
-pub struct Dimension(pub i32, pub i32);
 
 
 struct Main {}

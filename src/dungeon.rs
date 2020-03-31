@@ -48,7 +48,7 @@ pub fn make_map(
                 let (prev_x, prev_y) = rooms[rooms.len() - 1].center();
 
                 // toss a coin
-                if rand::random() {
+                if rostlaube::rng::random() {
                     // first move horizontally, then vertically
                     create_h_tunnel(prev_x, new_x, prev_y, &mut map);
                     create_v_tunnel(prev_y, new_y, new_x, &mut map);

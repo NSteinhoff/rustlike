@@ -84,11 +84,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustlike"
+name = "rostlaube"
 version = "0.1.0"
 dependencies = [
  "rand 0.3.23",
  "tcod",
+]
+
+[[package]]
+name = "rustlike"
+version = "0.1.0"
+dependencies = [
+ "rostlaube",
 ]
 
 [[package]]

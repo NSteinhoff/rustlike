@@ -8,16 +8,17 @@ pub enum Ai {
     Confused { previous: Box<Ai>, num_turns: i32 },
 }
 
-/// Calculate an Ai turn
-pub fn turn(id: usize, ai: Ai, game: &Game) -> (game::Turn, Ai) {
-    // If you can see it, it can see you
-    match ai {
-        Ai::Basic => basic(id, &game),
-        Ai::Idle => idle(id, &game),
-        Ai::Confused {
-            previous,
-            num_turns,
-        } => confused(id, &game, previous, num_turns),
+impl Ai {
+    /// Calculate an Ai turn
+    pub fn turn(self, id: usize, game: &Game) -> (game::Turn, Self) {
+        match self {
+            Ai::Basic => basic(id, &game),
+            Ai::Idle => idle(id, &game),
+            Ai::Confused {
+                previous,
+                num_turns,
+            } => confused(id, &game, previous, num_turns),
+        }
     }
 }
 

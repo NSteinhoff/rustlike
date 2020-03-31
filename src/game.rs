@@ -1,8 +1,8 @@
 use std::cmp;
 
-use crate::ai::{self, Ai};
-use crate::engine::{colors, Color, Command, Engine, FovAlgorithm, FovMap};
-use crate::{dungeon, rng, Dimension, Direction, Location, PLAYER};
+use crate::ai::Ai;
+use crate::engine::{colors, Color, Command, FovAlgorithm, FovMap};
+use crate::{dungeon, rng, Engine, Dimension, Direction, Location, PLAYER};
 
 /// Field of view algorithm
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
@@ -150,7 +150,7 @@ impl Game {
         let mut actions = vec![];
         for id in PLAYER + 1..self.objects.len() {
             self.objects[id].ai.take().map(|ai| {
-                let (mut turn, new_ai) = ai::turn(id, ai, self);
+                let (mut turn, new_ai) = ai.turn(id, self);
                 actions.append(&mut turn);
                 self.objects[id].ai = Some(new_ai);
             });
