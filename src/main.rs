@@ -46,8 +46,12 @@
 //!     => Main Menu ! EXIT
 //!     <| OS
 
+use rostlaube::{Window, Layout, Event, Render};
 pub use rostlaube::rng;
 pub use rostlaube::geometry::{Location, Direction, Dimension};
+use rostlaube::colors::{self, Color};
+use rostlaube::console::{Console, Offscreen, BackgroundFlag, TextAlignment};
+use rostlaube::ui::Bar;
 
 // Internal
 pub mod ai;
@@ -55,8 +59,8 @@ pub mod dungeon;
 pub mod engine;
 pub mod game;
 
-use crate::engine::{colors, Engine, Command, Scene, Transition};
-use crate::game::{Action, Game, Messages, Object};
+use crate::engine::{Engine, Command, Scene, Transition, get_key_command};
+use crate::game::{Action, Game, Messages, Object, Tile};
 
 /// Width of the game screen in number of tiles
 const SCREEN_WIDTH: i32 = 1920 / 10 / 2;
@@ -80,6 +84,17 @@ const MAX_ROOMS: i32 = 30;
 const MAX_ROOM_MONSTERS: i32 = 3;
 /// Maximum number of items per room
 const MAX_ROOM_ITEMS: i32 = 2;
+
+/// Color used for unexplored areas
+const COLOR_UNEXPLORED: Color = colors::BLACK;
+/// Color used for dark walls
+const COLOR_DARK_WALL: Color = colors::DARKEST_GREY;
+/// Color used for light walls
+const COLOR_LIGHT_WALL: Color = colors::DARKER_GREY;
+/// Color used for dark ground
+const COLOR_DARK_GROUND: Color = colors::DARKER_GREY;
+/// Color used for light ground
+const COLOR_LIGHT_GROUND: Color = colors::DARK_GREY;
 
 /// Index of player in vector of objects
 const PLAYER: usize = 0; // The player will always be the first object
@@ -121,10 +136,6 @@ impl Scene for Main {
         engine.render(game)
     }
 
-    /// Accept input from the player
-    fn accept(&self, engine: &mut Engine) -> Command {
-        engine.next_command()
-    }
 
     /// Interpret command
     fn interpret(
@@ -163,12 +174,6 @@ impl Scene for MainMenu {
     fn present(&self, engine: &mut Engine, _game: &Game) {
         engine.render_main_menu()
     }
-
-    /// Accept input from the player
-    fn accept(&self, engine: &mut Engine) -> Command {
-        engine.next_command()
-    }
-
     /// Interpret command
     fn interpret(
         &self,
@@ -208,6 +213,7 @@ fn main() {
 
     // Create the game engine
     let mut engine = Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS);
+    let mut engine2 = rostlaube::Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS);
 
     println!("Number of monsters: {}", game.objects.len() - 1);
     println!("--- [{}] ---", game.turn + 1);
@@ -215,13 +221,26 @@ fn main() {
     let messages = game.update(false);
     game.messages.append(messages);
 
-    while engine.running() {
+    let mut layers = vec![
+        Screen::game_world(&engine2)
+    ];
+
+    while engine2.running() {
         scenes.last().map(|scene| {
-            scene.present(&mut engine, &game);
-            let command = scene.accept(&mut engine);
-            let (action, transition) = scene.interpret(&mut engine, &mut game, command);
-            action.map(|action| scene.update(&mut game, action));
-            transition
+            // scene.present(&mut engine, &game);
+            engine2.render(&game, &mut layers);
+
+            if let Event::KeyEvent(key) = engine2.next_event() {
+                let command = get_key_command(key);
+
+                let (action, transition) = scene.interpret(&mut engine, &mut game, command);
+
+                action.map(|action| scene.update(&mut game, action));
+
+                transition
+            } else {
+                Transition::Continue
+            }
         })
         .map(|transition| {
             match transition {
@@ -234,7 +253,201 @@ fn main() {
         println!("Scene Stack: {}", scenes.len());
         if scenes.is_empty() {
             engine.exit();
+            engine2.exit();
             println!("Game turns: {}", game.turn);
         }
+    }
+}
+
+enum View {
+    MainMenu,
+    GameWorld,
+}
+
+struct Screen {
+    window: Window,
+    view: View
+}
+
+impl Screen {
+    fn main_menu(engine: &rostlaube::Engine) -> Self {
+        Self {
+            window: engine.window(Layout::Fullscreen),
+            view: View::MainMenu,
+        }
+    }
+
+    fn game_world(engine: &rostlaube::Engine) -> Self {
+        Self {
+            window: engine.window(Layout::Fullscreen),
+            view: View::GameWorld,
+        }
+    }
+
+    fn render_game_world(&mut self, game: &Game) {
+        let focus = &game.objects[PLAYER].loc;
+
+        let source = &game.map_dimensions;
+        let target = &Dimension(self.window.con.width(), self.window.con.height());
+
+        let Dimension(map_width, map_height) = game.map_dimensions;
+        for y_map in 0..map_height {
+            for x_map in 0..map_width {
+                let loc = &Location(x_map, y_map);
+                let view_loc = rostlaube::geometry::translate(source, target, loc, focus);
+                if let Some(Location(x, y)) = view_loc {
+                    let tile = &game.map[x_map as usize][y_map as usize];
+                    let (color, char) = match (tile.explored, tile.visible, tile) {
+                        (
+                            true,
+                            true,
+                            Tile {
+                                blocked: true,
+                                char: c,
+                                ..
+                            },
+                        ) => (COLOR_LIGHT_WALL, Some(c)),
+                        (true, false, Tile { blocked: true, .. }) => (COLOR_DARK_WALL, None),
+                        (
+                            true,
+                            true,
+                            Tile {
+                                blocked: false,
+                                char: c,
+                                ..
+                            },
+                        ) => (COLOR_LIGHT_GROUND, Some(c)),
+                        (true, false, Tile { blocked: false, .. }) => (COLOR_DARK_GROUND, None),
+                        (false, _, _) => (COLOR_UNEXPLORED, None),
+                    };
+                    self.window
+                        .con
+                        .set_char_background(x, y, color, BackgroundFlag::Set);
+                    if let Some(c) = char {
+                        self.window.con.set_default_foreground(colors::LIGHT_GREY);
+                        self.window.con.put_char(x, y, *c, BackgroundFlag::None);
+                    }
+                }
+            }
+        }
+
+        // Sort the object to draw such that non-blocking objects are
+        // drawn first to avoid drawing them over other objects standing
+        // on top of them.
+        let mut to_draw: Vec<_> = game.objects.iter().filter(|o| o.visible).collect();
+
+        to_draw.sort_by(|a, b| a.blocks.cmp(&b.blocks));
+        for object in to_draw {
+            if let Some(loc) = rostlaube::geometry::translate(source, target, &object.loc, focus) {
+                rostlaube::draw(object, &mut self.window.con, &loc);
+            }
+        }
+    }
+
+    fn render_ui(&mut self, game: &Game) {
+        let player = &game.objects[PLAYER];
+        self.window.con.set_default_background(colors::BLACK);
+        self.window.con.clear();
+
+        if let Some(fighter) = player.fighter {
+            let health_bar = Bar {
+                x: 0,
+                y: 0,
+                color: colors::GREEN,
+                background: colors::RED,
+                current: fighter.health,
+                maximum: fighter.max_health,
+                width: self.window.con.width(),
+                name: String::from("HP"),
+            };
+            rostlaube::draw(&health_bar, &mut self.window.con, &Location(0, 0));
+        }
+
+        self.window.con.set_default_background(colors::BLACK);
+        self.window.con.set_default_foreground(colors::WHITE);
+        let y = 2;
+        let opponents = game::fighters_by_distance(PLAYER, &game.objects, game::TORCH_RADIUS);
+        for (i, &id) in opponents
+            .iter()
+            .rev()
+            .enumerate()
+            .take(self.window.con.height() as usize - y as usize - 1)
+        // Only as many as there is space for
+        {
+            let o = &game.objects[id];
+            if game.visible(&o.loc) {
+                self.window
+                    .con
+                    .put_char_ex(1, i as i32 + 1 + 1, o.char, o.color, colors::BLACK);
+                self.window.con.print_ex(
+                    2,
+                    i as i32 + y,
+                    BackgroundFlag::None,
+                    TextAlignment::Left,
+                    format!(" {}", o.name),
+                )
+            }
+        }
+    }
+
+    fn render_sidebar(&mut self, _game: &Game) {
+        self.window.con.set_default_background(colors::BLACK);
+        self.window.con.clear();
+    }
+
+    fn render_messages(&mut self, game: &Game) {
+        let messages = &game.messages;
+        self.window.con.set_default_background(colors::BLACK);
+        // self.window.con.clear();
+
+        rostlaube::draw(messages, &mut self.window.con, &Location(0, 0));
+    }
+
+    fn render_main_menu(&mut self, _game: &Game) {
+        let (w, h) = (self.window.con.width(), self.window.con.height());
+        self.window.con.set_default_background(colors::BLACK);
+        self.window.con.set_default_foreground(colors::WHITE);
+
+        self.window.con.print_rect_ex(
+            w / 2,
+            h / 4,
+            w - 2,
+            h - 2,
+            BackgroundFlag::Set,
+            TextAlignment::Center,
+            format!(
+                "{}\n\n{}\n\n\n\n\n{}",
+                "* Rustlike *",
+                "A short adventure in game development.",
+                "Press any key to self.window.continue. ESC to exit.",
+            ),
+        );
+    }
+}
+
+impl Render for Screen {
+    type State = Game;
+
+    fn render(&mut self, con: &mut Offscreen, game: &Game) {
+        use View::*;
+        self.window.con.clear();
+
+        match self.view {
+            GameWorld => {
+                self.render_game_world(game);
+                self.render_messages(game);
+            }
+            MainMenu => self.render_main_menu(game),
+        }
+
+        rostlaube::console::blit(
+            &self.window.con,
+            (0, 0),
+            (self.window.con.width(), self.window.con.height()),
+            con,
+            self.window.pos,
+            1.0,
+            1.0,
+        );
     }
 }

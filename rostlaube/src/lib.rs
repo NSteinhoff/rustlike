@@ -1,5 +1,5 @@
 // use tcod::console::Root;
-use tcod::console::{Root, Offscreen};
+use tcod::console::{Console, Root, Offscreen};
 use tcod::console::{FontLayout, FontType};
 
 // Re-export libtcod modules
@@ -14,13 +14,7 @@ pub mod rng;
 pub mod ui;
 pub mod geometry;
 
-use ui::{Draw, Window};
 use geometry::Location;
-
-/// The height of the bottom panel
-const PANEL_HEIGHT: i32 = 10;
-/// The width of the sidebar
-const SIDEBAR_PCT: i32 = 30;
 
 /// Draw an object on the view
 pub fn draw(item: &impl Draw, layer: &mut Offscreen, loc: &Location) {
@@ -31,11 +25,44 @@ pub fn draw(item: &impl Draw, layer: &mut Offscreen, loc: &Location) {
 pub struct Engine {
     running: bool,
     root: Root,
-    pub view: Window,
-    pub ui: Window,
-    pub messages: Window,
-    pub sidebar: Window,
 }
+
+
+pub trait Render {
+    type State;
+
+    fn render(&mut self, root: &mut Offscreen, state: &Self::State);
+}
+
+
+pub trait Interpret {
+    type State;
+    type Action;
+
+    fn interpret(&self, event: &Event, state: &Self::State) -> Option<Self::Action>;
+}
+
+
+pub trait Draw {
+    fn draw(&self, layer: &mut Offscreen, loc: &Location);
+}
+
+
+pub struct Window {
+    pub con: Offscreen,
+    pub pos: (i32, i32),
+}
+
+
+pub enum Layout {
+    Fullscreen,
+}
+
+pub enum Event {
+    KeyEvent(input::Key),
+    Nothing,
+}
+
 
 impl Engine {
     pub fn new(screen_width: i32, screen_height: i32, limit_fps: i32) -> Self {
@@ -48,45 +75,19 @@ impl Engine {
             .init();
         root.set_fullscreen(false);
 
-        let sidebar_width = (screen_width as f32 * (SIDEBAR_PCT as f32 / 100.0)) as i32;
-        println!("{}", sidebar_width);
-        let sidebar_height = screen_height;
-
-        let sidebar_x = screen_width - sidebar_width;
-        let sidebar_y = 0;
-
-        let panel_x = sidebar_x + 2;
-        let panel_y = sidebar_y + 2;
-        let panel_width = sidebar_width - 2 - 2;
-        let panel_height = PANEL_HEIGHT;
-
-        let msg_x = panel_x;
-        let msg_y = panel_y + panel_height + 2;
-        let msg_width = sidebar_width - 2 - 2;
-        let msg_height = sidebar_height - 2 - panel_height - 2 - 1;
-
-        let view_width = screen_width - sidebar_width - 2;
-        let view_height = screen_height - panel_height - 2;
-
         Engine {
             running: true,
             root: root,
-            view: Window {
-                con: Offscreen::new(view_width, view_height),
+        }
+    }
+
+    pub fn window(&self, layout: Layout) -> Window {
+        use Layout::*;
+        match layout {
+            Fullscreen => Window {
+                con: Offscreen::new(self.root.width(), self.root.height()),
                 pos: (0, 0),
-            },
-            ui: Window {
-                con: Offscreen::new(panel_width, panel_height),
-                pos: (panel_x, panel_y),
-            },
-            messages: Window {
-                con: Offscreen::new(msg_width, msg_height),
-                pos: (msg_x, msg_y),
-            },
-            sidebar: Window {
-                con: Offscreen::new(sidebar_width, sidebar_height),
-                pos: (sidebar_x, sidebar_y),
-            },
+            }
         }
     }
 
@@ -94,18 +95,83 @@ impl Engine {
         !self.root.window_closed() && self.running
     }
 
+    pub fn toggle_fullscreen(&mut self) {
+        let fullscreen = self.root.is_fullscreen();
+        self.root.set_fullscreen(!fullscreen);
+    }
+
     pub fn exit(&mut self) {
         // Toggle off fullscreen to avoid messing up the resolution
         self.root.set_fullscreen(false);
         self.running = false;
+    }
+
+    pub fn render<S, L>(&mut self, state: &S, layers: &mut [L])
+        where L: Render<State=S> {
+        self.root.set_default_background(colors::BLACK);
+
+        let mut con = Offscreen::new(self.root.width(), self.root.height());
+
+        for layer in layers {
+            layer.render(&mut con, state);
+        }
+
+        console::blit(
+            &con,
+            (0, 0),
+            (con.width(), con.height()),
+            &mut self.root,
+            (0, 0),
+            1.0,
+            1.0,
+        );
+
+        self.root.flush();
+    }
+
+    pub fn next_event(&mut self) -> Event {
+        use Event::*;
+        let key = self.root.wait_for_keypress(true);
+        KeyEvent(key)
     }
 }
 
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn do_something<T, S, A>(t: &mut T, s: S) -> Option<A>
+        where T: std::fmt::Debug,
+              T: Render<State=S>,
+              T: Interpret<State=S, Action=A> {
+        println!("{:?}", t);
+        let mut c = Offscreen::new(1, 1);
+        let e = Event::Nothing;
+
+        t.render(&mut c, &s);
+        t.interpret(&e, &s)
+    }
+
+    impl Render for bool {
+        type State = i32;
+        fn render(&mut self, _root: &mut Offscreen, _state: &Self::State) {}
+    }
+
+    impl Interpret for bool {
+        type State = i32;
+        type Action = bool;
+
+        fn interpret(&self, _event: &Event, _state: &Self::State) -> Option<Self::Action> {
+            Some(true)
+        }
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_doing() {
+        let mut t = true;
+        let s = 10;
+        let res = do_something(&mut t, s);
+        assert!(res.unwrap_or(false));
     }
 }

@@ -7,7 +7,8 @@ use rostlaube::console::{
     BackgroundFlag, Console, FontLayout, FontType, Offscreen, Root, TextAlignment,
 };
 pub use rostlaube::map::{FovAlgorithm, Map as FovMap};
-use rostlaube::ui::{Draw, Window, Bar}; // Re-exports only
+use rostlaube::{Draw, Window}; // Re-exports only
+use rostlaube::ui::Bar; // Re-exports only
 
 use crate::game::{self, Action, Game, Messages, Object, Tile};
 use crate::{Dimension, Location, PLAYER};
@@ -369,7 +370,7 @@ impl Engine {
     }
 }
 
-fn get_key_command(key: input::Key) -> Command {
+pub fn get_key_command(key: input::Key) -> Command {
     use rostlaube::input::{Key, KeyCode::Char, KeyCode::Enter, KeyCode::Escape};
     use Command::*;
     match key {
@@ -448,14 +449,15 @@ impl Draw for Object {
 }
 
 impl Draw for Messages {
-    fn draw(&self, layer: &mut Offscreen, _loc: &Location) {
+    fn draw(&self, layer: &mut Offscreen, loc: &Location) {
+        let Location(x, y) = loc;
         // The width of a printed line is constrained by the width of the
         // console
-        let width = layer.width();
+        let width = layer.width() - x;
 
         // The maximum number of lines that we can print is equal to the height
         // of console
-        let mut lines_remain = layer.height();
+        let mut lines_remain = layer.height() - y;
 
         // We iterate through the messages in reverse in order to start with the
         // latest message
@@ -515,10 +517,6 @@ pub trait Scene {
 
     /// Present the game state
     fn present(&self, engine: &mut Engine, game: &Game);
-
-    /// Accept input from the player
-    fn accept(&self, engine: &mut Engine) -> Command;
-
     /// Interpret command
     fn interpret(
         &self,

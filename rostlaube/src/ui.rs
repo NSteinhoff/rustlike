@@ -1,21 +1,10 @@
 use std::cmp;
 
-use crate::Location;
+use crate::{Draw, Location};
 use crate::console::{
     self, BackgroundFlag, Console, Offscreen, TextAlignment,
 };
 use crate::colors::{self, Color};
-
-
-pub trait Draw {
-    fn draw(&self, layer: &mut Offscreen, loc: &Location);
-}
-
-
-pub struct Window {
-    pub con: Offscreen,
-    pub pos: (i32, i32),
-}
 
 
 #[derive(Debug)]
