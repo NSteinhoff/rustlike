@@ -1,17 +1,14 @@
 pub use rostlaube::colors::{self, Color};
 
+use crate::ui::{self, Bar, Draw};
 use rostlaube::console;
-use rostlaube::input;
-use rostlaube::geometry;
 use rostlaube::console::{
     BackgroundFlag, Console, FontLayout, FontType, Offscreen, Root, TextAlignment,
 };
 pub use rostlaube::map::{FovAlgorithm, Map as FovMap};
-use rostlaube::{Draw, Window}; // Re-exports only
-use rostlaube::ui::Bar; // Re-exports only
 
-use crate::game::{self, Action, Game, Messages, Object, Tile};
-use crate::{Dimension, Location, PLAYER};
+use crate::game::{self, Game, Messages, Object};
+use crate::{Location, PLAYER};
 
 /// Color used for unexplored areas
 const COLOR_UNEXPLORED: Color = colors::BLACK;
@@ -28,6 +25,11 @@ const COLOR_LIGHT_GROUND: Color = colors::DARK_GREY;
 const PANEL_HEIGHT: i32 = 10;
 /// The width of the sidebar
 const SIDEBAR_PCT: i32 = 30;
+
+struct Window {
+    pub con: Offscreen,
+    pub pos: (i32, i32),
+}
 
 pub struct Engine {
     running: bool,
@@ -91,109 +93,6 @@ impl Engine {
         }
     }
 
-    pub fn running(&self) -> bool {
-        !self.root.window_closed() && self.running
-    }
-
-    pub fn exit(&mut self) {
-        // Toggle off fullscreen to avoid messing up the resolution
-        self.root.set_fullscreen(false);
-        self.running = false;
-    }
-
-    pub fn next_command(&mut self) -> Command {
-        let key = self.root.wait_for_keypress(true);
-        get_key_command(key)
-    }
-
-    pub fn toggle_fullscreen(&mut self) {
-        let fullscreen = self.root.is_fullscreen();
-        self.root.set_fullscreen(!fullscreen);
-    }
-
-    pub fn render(&mut self, game: &Game) {
-        self.root.set_default_background(colors::BLACK);
-
-        self.render_view(game);
-        self.render_sidebar(game);
-        self.render_ui(game);
-        self.render_messages(game);
-
-        self.root.flush();
-    }
-
-    fn render_view(&mut self, game: &Game) {
-        let focus = &game.objects[PLAYER].loc;
-
-        let source = &game.map_dimensions;
-        let target = &Dimension(self.view.con.width(), self.view.con.height());
-
-        self.view.con.clear();
-
-        let Dimension(map_width, map_height) = game.map_dimensions;
-        for y_map in 0..map_height {
-            for x_map in 0..map_width {
-                let loc = &Location(x_map, y_map);
-                let view_loc = geometry::translate(source, target, loc, focus);
-                if let Some(Location(x, y)) = view_loc {
-                    let tile = &game.map[x_map as usize][y_map as usize];
-                    let (color, char) = match (tile.explored, tile.visible, tile) {
-                        (
-                            true,
-                            true,
-                            Tile {
-                                blocked: true,
-                                char: c,
-                                ..
-                            },
-                        ) => (COLOR_LIGHT_WALL, Some(c)),
-                        (true, false, Tile { blocked: true, .. }) => (COLOR_DARK_WALL, None),
-                        (
-                            true,
-                            true,
-                            Tile {
-                                blocked: false,
-                                char: c,
-                                ..
-                            },
-                        ) => (COLOR_LIGHT_GROUND, Some(c)),
-                        (true, false, Tile { blocked: false, .. }) => (COLOR_DARK_GROUND, None),
-                        (false, _, _) => (COLOR_UNEXPLORED, None),
-                    };
-                    self.view
-                        .con
-                        .set_char_background(x, y, color, BackgroundFlag::Set);
-                    if let Some(c) = char {
-                        self.view.con.set_default_foreground(colors::LIGHT_GREY);
-                        self.view.con.put_char(x, y, *c, BackgroundFlag::None);
-                    }
-                }
-            }
-        }
-
-        // Sort the object to draw such that non-blocking objects are
-        // drawn first to avoid drawing them over other objects standing
-        // on top of them.
-        let mut to_draw: Vec<_> = game.objects.iter().filter(|o| o.visible).collect();
-
-        to_draw.sort_by(|a, b| a.blocks.cmp(&b.blocks));
-        for object in to_draw {
-            if let Some(loc) = geometry::translate(source, target, &object.loc, focus) {
-                rostlaube::draw(object, &mut self.view.con, &loc);
-            }
-        }
-
-        console::blit(
-            &self.view.con,
-            (0, 0),
-            (self.view.con.width(), self.view.con.height()),
-            &mut self.root,
-            self.view.pos,
-            1.0,
-            1.0,
-        );
-    }
-
     fn render_ui(&mut self, game: &Game) {
         let player = &game.objects[PLAYER];
         self.ui.con.set_default_background(colors::BLACK);
@@ -210,7 +109,7 @@ impl Engine {
                 width: self.ui.con.width(),
                 name: String::from("HP"),
             };
-            rostlaube::draw(&health_bar, &mut self.ui.con, &Location(0, 0));
+            ui::draw(&health_bar, &mut self.ui.con, &Location(0, 0));
         }
 
         self.ui.con.set_default_background(colors::BLACK);
@@ -271,7 +170,7 @@ impl Engine {
         self.messages.con.set_default_background(colors::BLACK);
         self.messages.con.clear();
 
-        rostlaube::draw(messages, &mut self.messages.con, &Location(0, 0));
+        ui::draw(messages, &mut self.messages.con, &Location(0, 0));
 
         console::blit(
             &self.messages.con,
@@ -343,100 +242,6 @@ impl Engine {
             None
         }
     }
-
-    pub fn render_main_menu(&mut self) {
-        let (w, h) = (self.root.width(), self.root.height());
-        let mut con = Offscreen::new(w, h);
-        con.set_default_background(colors::BLACK);
-        con.set_default_foreground(colors::WHITE);
-
-        con.print_rect_ex(
-            w / 2,
-            h / 4,
-            w - 2,
-            h - 2,
-            BackgroundFlag::Set,
-            TextAlignment::Center,
-            format!(
-                "{}\n\n{}\n\n\n\n\n{}",
-                "* Rustlike *",
-                "A short adventure in game development.",
-                "Press any key to continue. ESC to exit.",
-            ),
-        );
-
-        console::blit(&con, (0, 0), (w, h), &mut self.root, (0, 0), 1.0, 1.0);
-        self.root.flush();
-    }
-}
-
-pub fn get_key_command(key: input::Key) -> Command {
-    use rostlaube::input::{Key, KeyCode::Char, KeyCode::Enter, KeyCode::Escape};
-    use Command::*;
-    match key {
-        Key { code: Escape, .. } => Exit,
-        Key {
-            code: Enter,
-            alt: true,
-            ..
-        } => ToggleFullScreen,
-        Key {
-            code: Char,
-            printable: 'k',
-            ..
-        } => Up,
-        Key {
-            code: Char,
-            printable: 'j',
-            ..
-        } => Down,
-        Key {
-            code: Char,
-            printable: 'h',
-            ..
-        } => Left,
-        Key {
-            code: Char,
-            printable: 'l',
-            ..
-        } => Right,
-        Key {
-            code: Char,
-            printable: 'y',
-            ..
-        } => UpLeft,
-        Key {
-            code: Char,
-            printable: 'u',
-            ..
-        } => UpRight,
-        Key {
-            code: Char,
-            printable: 'b',
-            ..
-        } => DownLeft,
-        Key {
-            code: Char,
-            printable: 'n',
-            ..
-        } => DownRight,
-        Key {
-            code: Char,
-            printable: '.',
-            ..
-        } => Skip,
-        Key {
-            code: Char,
-            printable: 'g',
-            ..
-        } => Grab,
-        Key {
-            code: Char,
-            printable: 'i',
-            ..
-        } => OpenInventory,
-        _ => Nothing,
-    }
 }
 
 impl Draw for Object {
@@ -478,50 +283,4 @@ impl Draw for Messages {
             layer.print_rect(0, y, width, 0, msg);
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Command {
-    Exit,
-    Skip,
-    Nothing,
-    ToggleFullScreen,
-    OpenInventory,
-
-    Left,
-    Right,
-    Up,
-    Down,
-    UpLeft,
-    UpRight,
-    DownLeft,
-    DownRight,
-
-    Grab,
-}
-
-/// Scene transitions
-///
-/// Exit: Exit the current scene
-/// Continue: Remain in the current scene
-/// Next: Move to the next scene
-pub enum Transition {
-    Exit,
-    Continue,
-    Next(Box<dyn Scene>),
-}
-
-pub trait Scene {
-    /// Update the game state
-    fn update(&self, game: &mut Game, action: Action);
-
-    /// Present the game state
-    fn present(&self, engine: &mut Engine, game: &Game);
-    /// Interpret command
-    fn interpret(
-        &self,
-        engine: &mut Engine,
-        game: &mut Game,
-        cmd: Command,
-    ) -> (Option<Action>, Transition);
 }

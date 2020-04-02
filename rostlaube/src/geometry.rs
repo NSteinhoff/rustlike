@@ -6,7 +6,6 @@ pub struct Direction(pub i32, pub i32);
 #[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub struct Dimension(pub i32, pub i32);
 
-
 pub fn translate(
     source: &Dimension,
     target: &Dimension,

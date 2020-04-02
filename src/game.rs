@@ -1,8 +1,13 @@
 use std::cmp;
 
 use crate::ai::Ai;
-use crate::engine::{colors, Color, Command, FovAlgorithm, FovMap};
-use crate::{dungeon, rng, Engine, Dimension, Direction, Location, PLAYER};
+use crate::ui::{self, Bar};
+use crate::Screen;
+use crate::Transition;
+use crate::{colors, Color, FovAlgorithm, FovMap};
+use crate::{dungeon, rng, Dimension, Direction, Location, PLAYER};
+use crate::{BackgroundFlag, Console, Offscreen, TextAlignment};
+use crate::{Key, KeyCode};
 
 /// Field of view algorithm
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
@@ -21,6 +26,17 @@ const CONFUSE_RANGE: i32 = 5;
 /// The number of turns a monster is confused
 const CONFUSE_NUM_TURNS: i32 = 5;
 
+/// Color used for unexplored areas
+const COLOR_UNEXPLORED: Color = colors::BLACK;
+/// Color used for dark walls
+const COLOR_DARK_WALL: Color = colors::DARKEST_GREY;
+/// Color used for light walls
+const COLOR_LIGHT_WALL: Color = colors::DARKER_GREY;
+/// Color used for dark ground
+const COLOR_DARK_GROUND: Color = colors::DARKER_GREY;
+/// Color used for light ground
+const COLOR_LIGHT_GROUND: Color = colors::DARK_GREY;
+
 pub type Map = Vec<Vec<Tile>>;
 pub type Turn = Vec<Action>;
 pub type Message = (String, Color);
@@ -34,7 +50,6 @@ pub struct Game {
     pub objects: Vec<Object>,
     pub turn: i32,
     pub turns: Vec<(Turn, Turn)>,
-    pub commands: Vec<Command>,
     pub messages: Messages,
     pub inventory: Inventory,
     pub fov: FovMap,
@@ -44,13 +59,14 @@ pub struct Game {
 
 impl Game {
     pub fn new(
-        player: Object,
+        player_name: &str,
         map_dimensions: Dimension,
         room_dimensions: Dimension,
         max_rooms: i32,
         max_room_monsters: i32,
         max_room_items: i32,
     ) -> Self {
+        let player = Object::player(Location(0, 0), player_name);
         let mut objects = vec![player];
         let Dimension(map_width, map_height) = map_dimensions;
         let mut game = Game {
@@ -65,7 +81,6 @@ impl Game {
             objects: objects,
             turn: 0,
             turns: vec![],
-            commands: vec![],
             messages: Messages::empty(),
             inventory: vec![],
             fov: FovMap::new(map_width, map_height),
@@ -73,6 +88,12 @@ impl Game {
             player_turn: vec![],
         };
         game.init_fov();
+        game.refresh();
+
+        game.messages.add(
+            "You've stumbled into some very rusty caves. Prepare yourself.",
+            colors::GREEN,
+        );
 
         game
     }
@@ -102,49 +123,6 @@ impl Game {
         }
     }
 
-    /// Return player turn based on command input
-    pub fn player_turn(
-        &self,
-        command: &Command,
-        engine: &mut Engine,
-    ) -> (Option<Action>, Messages) {
-        use Command::*;
-        if self.objects[PLAYER].alive {
-            match command {
-                // Movement
-                Up => move_or_attack(PLAYER, Direction(0, -1), &self.map, &self.objects),
-                Down => move_or_attack(PLAYER, Direction(0, 1), &self.map, &self.objects),
-                Left => move_or_attack(PLAYER, Direction(-1, 0), &self.map, &self.objects),
-                Right => move_or_attack(PLAYER, Direction(1, 0), &self.map, &self.objects),
-                UpLeft => move_or_attack(PLAYER, Direction(-1, -1), &self.map, &self.objects),
-                UpRight => move_or_attack(PLAYER, Direction(1, -1), &self.map, &self.objects),
-                DownLeft => move_or_attack(PLAYER, Direction(-1, 1), &self.map, &self.objects),
-                DownRight => move_or_attack(PLAYER, Direction(1, 1), &self.map, &self.objects),
-
-                // Actions
-                Grab => grab(PLAYER, &self.objects),
-                Skip => (Some(Action::Wait(PLAYER)), Messages::empty()),
-
-                OpenInventory => {
-                    let mut items: Vec<&str> = vec![];
-                    for item in &self.inventory {
-                        items.push(&item.name);
-                    }
-                    if let Some(choice) = self.open_inventory(engine, "Pick item to use:") {
-                        (Some(Action::UseItem(PLAYER, choice)), Messages::empty())
-                    } else {
-                        (None, Messages::empty())
-                    }
-                }
-
-                // Unmapped command
-                _ => (None, Messages::empty()),
-            }
-        } else {
-            (None, Messages::empty())
-        }
-    }
-
     /// Monster turn
     pub fn ai_turns(&mut self) -> Turn {
         let mut actions = vec![];
@@ -158,12 +136,17 @@ impl Game {
         actions
     }
 
-    pub fn update(&mut self, full_turn: bool) -> Messages {
-        let mut messages = Messages::empty();
-        messages.append(self.update_fov());
-        messages.append(self.update_map());
-        messages.append(self.update_objects(full_turn));
-        messages
+    pub fn refresh(&mut self) {
+        self.update_fov();
+        self.update_map();
+        self.update_objects(false);
+    }
+
+    pub fn rollover(&mut self, player: Turn, ai: Turn) {
+        self.update_fov();
+        self.update_map();
+        self.update_objects(true);
+        self.turn(player, ai);
     }
 
     fn update_map(&mut self) -> Messages {
@@ -183,7 +166,7 @@ impl Game {
         Messages::empty()
     }
 
-    fn update_objects(&mut self, full_turn: bool) -> Messages {
+    fn update_objects(&mut self, full_turn: bool) {
         let mut messages = Messages::empty();
         for id in 0..self.objects.len() {
             if self.visible(&self.objects[id].loc) {
@@ -210,7 +193,7 @@ impl Game {
                 let _ = regenerate(&mut self.objects[id]);
             }
         }
-        messages
+        self.messages.append(messages)
     }
 
     fn init_fov(&mut self) {
@@ -239,13 +222,196 @@ impl Game {
         self.fov.is_in_fov(x, y)
     }
 
-    fn open_inventory(&self, engine: &mut Engine, title: &str) -> Option<usize> {
-        let mut items: Vec<&str> = vec![];
-        for item in &self.inventory {
-            items.push(&item.name);
-        }
-        engine.menu(title, &items, 25)
+    fn movement(c: &char) -> Option<Action> {
+        let direction = match c {
+            'k' => Some(Direction(0, -1)),
+            'j' => Some(Direction(0, 1)),
+            'h' => Some(Direction(-1, 0)),
+            'l' => Some(Direction(1, 0)),
+            'y' => Some(Direction(-1, -1)),
+            'u' => Some(Direction(1, -1)),
+            'b' => Some(Direction(-1, 1)),
+            'n' => Some(Direction(1, 1)),
+            _ => None,
+        };
+        direction.map(|d| Action::Move(PLAYER, d))
     }
+
+    pub fn render_game_world(&self, con: &mut Offscreen) {
+        let focus = &self.objects[PLAYER].loc;
+
+        let source = &self.map_dimensions;
+        let target = &Dimension(con.width(), con.height());
+
+        let Dimension(map_width, map_height) = self.map_dimensions;
+        for y_map in 0..map_height {
+            for x_map in 0..map_width {
+                let loc = &Location(x_map, y_map);
+                let view_loc = rostlaube::geometry::translate(source, target, loc, focus);
+                if let Some(Location(x, y)) = view_loc {
+                    let tile = &self.map[x_map as usize][y_map as usize];
+                    let (color, char) = match (tile.explored, tile.visible, tile) {
+                        (
+                            true,
+                            true,
+                            Tile {
+                                blocked: true,
+                                char: c,
+                                ..
+                            },
+                        ) => (COLOR_LIGHT_WALL, Some(c)),
+                        (true, false, Tile { blocked: true, .. }) => (COLOR_DARK_WALL, None),
+                        (
+                            true,
+                            true,
+                            Tile {
+                                blocked: false,
+                                char: c,
+                                ..
+                            },
+                        ) => (COLOR_LIGHT_GROUND, Some(c)),
+                        (true, false, Tile { blocked: false, .. }) => (COLOR_DARK_GROUND, None),
+                        (false, _, _) => (COLOR_UNEXPLORED, None),
+                    };
+                    con.set_char_background(x, y, color, BackgroundFlag::Set);
+                    if let Some(c) = char {
+                        con.set_default_foreground(colors::LIGHT_GREY);
+                        con.put_char(x, y, *c, BackgroundFlag::None);
+                    }
+                }
+            }
+        }
+
+        // Sort the object to draw such that non-blocking objects are
+        // drawn first to avoid drawing them over other objects standing
+        // on top of them.
+        let mut to_draw: Vec<_> = self.objects.iter().filter(|o| o.visible).collect();
+
+        to_draw.sort_by(|a, b| a.blocks.cmp(&b.blocks));
+        for object in to_draw {
+            if let Some(loc) = rostlaube::geometry::translate(source, target, &object.loc, focus) {
+                ui::draw(object, con, &loc);
+            }
+        }
+    }
+
+    fn render_ui(&self, con: &mut Offscreen) {
+        let player = &self.objects[PLAYER];
+        con.set_default_background(colors::BLACK);
+        con.clear();
+
+        if let Some(fighter) = player.fighter {
+            let health_bar = Bar {
+                x: 0,
+                y: 0,
+                color: colors::GREEN,
+                background: colors::RED,
+                current: fighter.health,
+                maximum: fighter.max_health,
+                width: con.width(),
+                name: String::from("HP"),
+            };
+            ui::draw(&health_bar, con, &Location(0, 0));
+        }
+
+        con.set_default_background(colors::BLACK);
+        con.set_default_foreground(colors::WHITE);
+        let y = 2;
+        let opponents = fighters_by_distance(PLAYER, &self.objects, TORCH_RADIUS);
+        for (i, &id) in opponents
+            .iter()
+            .rev()
+            .enumerate()
+            .take(con.height() as usize - y as usize - 1)
+        // Only as many as there is space for
+        {
+            let o = &self.objects[id];
+            if self.visible(&o.loc) {
+                con.put_char_ex(1, i as i32 + 1 + 1, o.char, o.color, colors::BLACK);
+                con.print_ex(
+                    2,
+                    i as i32 + y,
+                    BackgroundFlag::None,
+                    TextAlignment::Left,
+                    format!(" {}", o.name),
+                )
+            }
+        }
+    }
+
+    pub fn render_messages(&self, con: &mut Offscreen) {
+        let messages = &self.messages;
+        con.set_default_background(colors::BLACK);
+        // self.window.con.clear();
+
+        ui::draw(messages, con, &Location(0, 0));
+    }
+
+    pub fn render_main_menu(&self, con: &mut Offscreen) {
+        con.set_default_background(colors::BLACK);
+        con.set_default_foreground(colors::WHITE);
+
+        let (w, h) = (con.width(), con.height());
+
+        con.print_rect_ex(
+            w / 2,
+            h / 4,
+            w - 2,
+            h - 2,
+            BackgroundFlag::Set,
+            TextAlignment::Center,
+            format!(
+                "{}\n\n{}\n\n\n\n\n{}",
+                "* Rustlike *",
+                "A short adventure in game development.",
+                "Press Enter to start a game. ESC to exit.",
+            ),
+        );
+    }
+
+    pub fn action(&self, key: &Key) -> (Option<Action>, Transition<Screen>) {
+        use KeyCode::Char;
+        use Screen::*;
+        use Transition::*;
+
+        match key {
+            Key {
+                code: Char,
+                printable: c,
+                ..
+            } => match c {
+                'j' | 'k' | 'h' | 'l' | 'y' | 'u' | 'b' | 'n' => (Self::movement(c), Continue),
+                'i' => (None, Next(Inventory)),
+                'c' => (None, Next(Character)),
+                _ => (None, Continue),
+            },
+            _ => (None, Continue),
+        }
+    }
+
+    pub fn update(&mut self, action: Action) {
+        self.player_turn.push(action);
+        self.play(&vec![action]);
+        self.refresh();
+
+        // Some actions don't consume a turn
+        if action.took_turn() {
+            // Calculate the reaction of the AI and play
+            // the AI turn.
+            let ai_turns = self.ai_turns();
+            self.play(&ai_turns);
+
+            self.rollover(self.player_turn.clone(), ai_turns);
+        }
+    }
+
+    // fn open_inventory(&self, engine: &mut Engine, title: &str) -> Option<usize> {
+    //     let mut items: Vec<&str> = vec![];
+    //     for item in &self.inventory {
+    //         items.push(&item.name);
+    //     }
+    //     engine.menu(title, &items, 25)
+    // }
 }
 
 pub struct Messages {

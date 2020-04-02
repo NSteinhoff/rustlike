@@ -1,11 +1,16 @@
 use std::cmp;
 
-use crate::{Draw, Location};
-use crate::console::{
-    self, BackgroundFlag, Console, Offscreen, TextAlignment,
-};
 use crate::colors::{self, Color};
+use crate::console::{self, BackgroundFlag, Console, Offscreen, TextAlignment};
+use crate::Location;
 
+/// Draw an object on the view
+pub trait Draw {
+    fn draw(&self, layer: &mut Offscreen, loc: &Location);
+}
+pub fn draw(item: &impl Draw, layer: &mut Offscreen, loc: &Location) {
+    item.draw(layer, loc)
+}
 
 #[derive(Debug)]
 pub struct Bar {
@@ -18,7 +23,6 @@ pub struct Bar {
     pub color: Color,
     pub background: Color,
 }
-
 
 impl Draw for Bar {
     fn draw(&self, layer: &mut Offscreen, _loc: &Location) {

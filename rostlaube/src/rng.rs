@@ -1,5 +1,5 @@
-use rand::Rng;
 pub use rand::random;
+use rand::Rng;
 
 /// Random number within an inclusive [min:max] range
 pub fn within(min: i32, max: i32) -> i32 {
