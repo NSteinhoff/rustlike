@@ -2,7 +2,7 @@ use std::cmp;
 
 use crate::ai::Ai;
 use crate::ui::{self, Bar};
-use crate::Screen;
+use crate::GameScreen;
 use crate::Transition;
 use crate::{colors, Color, FovAlgorithm, FovMap};
 use crate::{dungeon, rng, Dimension, Direction, Location, PLAYER};
@@ -55,6 +55,20 @@ pub struct Game {
     pub fov: FovMap,
     pub map_dimensions: Dimension,
     pub player_turn: Turn,
+}
+
+impl std::fmt::Debug for Game {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "Game: \
+             turn: {:?}, \
+             player: {:?} \
+             inventory: {:?} \
+             ",
+            self.turn, self.objects[0], self.inventory,
+        )
+    }
 }
 
 impl Game {
@@ -347,31 +361,9 @@ impl Game {
         ui::draw(messages, con, &Location(0, 0));
     }
 
-    pub fn render_main_menu(&self, con: &mut Offscreen) {
-        con.set_default_background(colors::BLACK);
-        con.set_default_foreground(colors::WHITE);
-
-        let (w, h) = (con.width(), con.height());
-
-        con.print_rect_ex(
-            w / 2,
-            h / 4,
-            w - 2,
-            h - 2,
-            BackgroundFlag::Set,
-            TextAlignment::Center,
-            format!(
-                "{}\n\n{}\n\n\n\n\n{}",
-                "* Rustlike *",
-                "A short adventure in game development.",
-                "Press Enter to start a game. ESC to exit.",
-            ),
-        );
-    }
-
-    pub fn action(&self, key: &Key) -> (Option<Action>, Transition<Screen>) {
+    pub fn action(&self, key: &Key) -> (Option<Action>, Transition<GameScreen>) {
+        use GameScreen::*;
         use KeyCode::Char;
-        use Screen::*;
         use Transition::*;
 
         match key {
@@ -414,6 +406,7 @@ impl Game {
     // }
 }
 
+#[derive(Debug)]
 pub struct Messages {
     messages: Vec<Message>,
 }

@@ -91,39 +91,129 @@ const PLAYER: usize = 0; // The player will always be the first object
 
 /// Main entry point
 fn main() {
-    let game = Game::new(
-        "Rodney",
-        Dimension(MAP_WIDTH, MAP_HEIGHT),
-        Dimension(ROOM_MIN_SIZE, ROOM_MAX_SIZE),
-        MAX_ROOMS,
-        MAX_ROOM_MONSTERS,
-        MAX_ROOM_ITEMS,
-    );
-    rostlaube::Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS).run(game, Screen::MainMenu);
+    let mut engine = rostlaube::Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS);
+
+    let settings = engine.run(None, SettingsScreen::MainMenu);
+
+    let game = settings.and_then(|settings| match settings {
+        Settings::NewGame { player_name } => Some(Game::new(
+            &player_name,
+            Dimension(MAP_WIDTH, MAP_HEIGHT),
+            Dimension(ROOM_MIN_SIZE, ROOM_MAX_SIZE),
+            MAX_ROOMS,
+            MAX_ROOM_MONSTERS,
+            MAX_ROOM_ITEMS,
+        )),
+        Settings::LoadGame { path } => {
+            println!("Load game from: {:?}", path);
+            None
+        }
+    });
+
+    engine.run_if(game, GameScreen::GameWorld).map(|game| {
+        println!("Final game state:");
+        println!("{:?}", game);
+        game
+    });
+
+    engine.exit();
 }
 
 #[derive(Debug)]
-pub enum Screen {
+pub enum Settings {
+    NewGame { player_name: String },
+    LoadGame { path: String },
+}
+
+#[derive(Debug)]
+pub enum SettingsScreen {
     MainMenu,
+}
+
+impl Scene for SettingsScreen {
+    type State = Option<Settings>;
+    type Action = String;
+
+    fn render(&self, con: &mut Offscreen, _settings: &Self::State) {
+        use SettingsScreen::*;
+
+        match self {
+            MainMenu => {
+                con.set_default_background(colors::BLACK);
+                con.set_default_foreground(colors::WHITE);
+
+                let (w, h) = (con.width(), con.height());
+
+                con.print_rect_ex(
+                    w / 2,
+                    h / 4,
+                    w - 2,
+                    h - 2,
+                    BackgroundFlag::Set,
+                    TextAlignment::Center,
+                    format!(
+                        "{}\n\n{}\n\n\n\n\n{}",
+                        "* Rustlike *",
+                        "A short adventure in game development.",
+                        "Press Enter to start a game. ESC to exit.",
+                    ),
+                );
+            } //game.render_main_menu(con),
+        }
+    }
+
+    fn interpret(
+        &self,
+        event: &Event,
+        _settings: &Self::State,
+    ) -> (Option<Self::Action>, Transition<Self>) {
+        use Event::*;
+        use KeyCode::{Enter, Escape};
+        use SettingsScreen::*;
+        use Transition::*;
+
+        match self {
+            MainMenu => match event {
+                KeyEvent(Key { code: Escape, .. }) => (None, Exit),
+                KeyEvent(Key { code: Enter, .. }) => (Some(String::from("Rodney")), Exit),
+                _ => (None, Continue),
+            },
+        }
+    }
+
+    fn update(&self, action: Self::Action, settings: &mut Self::State) {
+        use SettingsScreen::*;
+
+        match self {
+            MainMenu => {
+                settings.replace(Settings::NewGame {
+                    player_name: action,
+                });
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum GameScreen {
     GameWorld,
     Console,
     Inventory,
     Character,
 }
 
-impl Scene for Screen {
+impl Scene for GameScreen {
     type State = Game;
     type Action = Action;
 
-    fn render(&self, con: &mut Offscreen, game: &Game) {
-        use Screen::*;
+    fn render(&self, con: &mut Offscreen, game: &Self::State) {
+        use GameScreen::*;
 
         match self {
             GameWorld => {
                 game.render_game_world(con);
                 game.render_messages(con);
             }
-            MainMenu => game.render_main_menu(con),
             Inventory => println!("Show inventory"),
             Character => println!("Show character"),
             Console => println!("Show console"),
@@ -133,19 +223,14 @@ impl Scene for Screen {
     fn interpret(
         &self,
         event: &Event,
-        game: &mut Game,
+        game: &Self::State,
     ) -> (Option<Self::Action>, Transition<Self>) {
         use Event::*;
-        use KeyCode::{Enter, Escape};
-        use Screen::*;
+        use GameScreen::*;
+        use KeyCode::Escape;
         use Transition::*;
 
         match self {
-            MainMenu => match event {
-                KeyEvent(Key { code: Escape, .. }) => (None, Exit),
-                KeyEvent(Key { code: Enter, .. }) => (None, Next(GameWorld)),
-                _ => (None, Continue),
-            },
             GameWorld => match event {
                 KeyEvent(Key { code: Escape, .. }) => (None, Exit),
                 KeyEvent(key) => game.action(key),
@@ -157,11 +242,10 @@ impl Scene for Screen {
         }
     }
 
-    fn update(&self, action: Action, game: &mut Game) {
-        use Screen::*;
+    fn update(&self, action: Self::Action, game: &mut Self::State) {
+        use GameScreen::*;
 
         match self {
-            MainMenu => {}
             GameWorld => game.update(action),
             Inventory => {}
             Character => {}

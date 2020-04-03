@@ -30,7 +30,7 @@ pub trait Scene: std::marker::Sized {
     fn interpret(
         &self,
         event: &Event,
-        state: &mut Self::State,
+        state: &Self::State,
     ) -> (Option<Self::Action>, Transition<Self>);
 
     fn update(&self, action: Self::Action, state: &mut Self::State);
@@ -41,6 +41,7 @@ pub enum Transition<T: Scene> {
     Exit,
     Continue,
     Next(T),
+    Replace(T),
 }
 
 #[derive(Debug)]
@@ -66,7 +67,7 @@ impl Engine {
         }
     }
 
-    pub fn run<L, S, A>(&mut self, mut state: S, start: L)
+    pub fn run<L, S, A>(&mut self, mut state: S, start: L) -> S
     where
         A: std::fmt::Debug,
         L: std::fmt::Debug,
@@ -101,12 +102,34 @@ impl Engine {
                         scenes.pop();
                     }
                     Transition::Next(s) => scenes.push(s),
+                    Transition::Replace(s) => {
+                        scenes.pop();
+                        scenes.push(s);
+                    }
                 });
 
             if scenes.is_empty() {
-                self.exit();
+                break;
+                // self.exit();
             }
         }
+
+        state
+    }
+
+    pub fn run_if<L, S, A>(&mut self, state: Option<S>, start: L) -> Option<S>
+    where
+        A: std::fmt::Debug,
+        L: std::fmt::Debug,
+        L: Scene<State = S, Action = A>,
+    {
+        state.map(|s| self.run(s, start))
+    }
+
+    pub fn exit(&mut self) {
+        // Toggle off fullscreen to avoid messing up the resolution
+        self.root.set_fullscreen(false);
+        self.running = false;
     }
 }
 
@@ -141,12 +164,6 @@ impl Engine {
     fn toggle_fullscreen(&mut self) {
         let fullscreen = self.root.is_fullscreen();
         self.root.set_fullscreen(!fullscreen);
-    }
-
-    fn exit(&mut self) {
-        // Toggle off fullscreen to avoid messing up the resolution
-        self.root.set_fullscreen(false);
-        self.running = false;
     }
 
     fn next_event(&mut self) -> Option<Event> {
