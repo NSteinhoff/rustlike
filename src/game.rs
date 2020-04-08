@@ -2,12 +2,9 @@ use std::cmp;
 
 use crate::ai::Ai;
 use crate::ui::{self, Bar};
-use crate::GameScreen;
-use crate::Transition;
 use crate::{colors, Color, FovAlgorithm, FovMap};
 use crate::{dungeon, rng, Dimension, Direction, Location, PLAYER};
 use crate::{BackgroundFlag, Console, Offscreen, TextAlignment};
-use crate::{Key, KeyCode};
 
 /// Field of view algorithm
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
@@ -132,6 +129,7 @@ impl Game {
                 Action::Mumble(id) => mumble(id, &self.objects),
                 Action::Wait(_) => Messages::empty(),
                 Action::UseItem(id, item) => use_item(id, item, self),
+                _ => Messages::empty(),
             };
             self.messages.append(msgs);
         }
@@ -234,21 +232,6 @@ impl Game {
     pub fn visible(&self, loc: &Location) -> bool {
         let Location(x, y) = *loc;
         self.fov.is_in_fov(x, y)
-    }
-
-    fn movement(c: &char) -> Option<Action> {
-        let direction = match c {
-            'k' => Some(Direction(0, -1)),
-            'j' => Some(Direction(0, 1)),
-            'h' => Some(Direction(-1, 0)),
-            'l' => Some(Direction(1, 0)),
-            'y' => Some(Direction(-1, -1)),
-            'u' => Some(Direction(1, -1)),
-            'b' => Some(Direction(-1, 1)),
-            'n' => Some(Direction(1, 1)),
-            _ => None,
-        };
-        direction.map(|d| Action::Move(PLAYER, d))
     }
 
     pub fn render_game_world(&self, con: &mut Offscreen) {
@@ -361,27 +344,8 @@ impl Game {
         ui::draw(messages, con, &Location(0, 0));
     }
 
-    pub fn action(&self, key: &Key) -> (Option<Action>, Transition<GameScreen>) {
-        use GameScreen::*;
-        use KeyCode::Char;
-        use Transition::*;
-
-        match key {
-            Key {
-                code: Char,
-                printable: c,
-                ..
-            } => match c {
-                'j' | 'k' | 'h' | 'l' | 'y' | 'u' | 'b' | 'n' => (Self::movement(c), Continue),
-                'i' => (None, Next(Inventory)),
-                'c' => (None, Next(Character)),
-                _ => (None, Continue),
-            },
-            _ => (None, Continue),
-        }
-    }
-
     pub fn update(&mut self, action: Action) {
+
         self.player_turn.push(action);
         self.play(&vec![action]);
         self.refresh();
@@ -689,6 +653,7 @@ pub enum Action {
     Bark(usize),
     Mumble(usize),
     Wait(usize),
+    Nothing,
 }
 
 impl Action {
@@ -698,10 +663,11 @@ impl Action {
             Move(_, _) => true,
             Attack(_, _) => true,
             PickUp(_, _) => true,
-            UseItem(_, _) => false,
             Bark(_) => true,
             Mumble(_) => true,
             Wait(_) => true,
+            UseItem(_, _) => false,
+            Nothing => false,
         }
     }
 }

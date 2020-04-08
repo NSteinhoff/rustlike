@@ -30,10 +30,9 @@ pub trait State: std::marker::Sized {
     fn interpret(
         &self,
         event: &Event,
-        world: &Self::World,
-    ) -> (Option<Self::Action>, Transition<Self>);
+    ) -> Self::Action;
 
-    fn update(&self, action: Self::Action, world: &mut Self::World);
+    fn update(&self, action: Self::Action, world: &mut Self::World) -> Transition<Self>;
 }
 
 #[derive(Debug)]
@@ -90,22 +89,25 @@ impl Engine {
                     event.map(|e| (scene, e))
                 })
                 .map(|(scene, event)| {
-                    let (action, transition) = scene.interpret(&event, &mut world);
+                    let action = scene.interpret(&event);
                     println!("ENGINE: action = {:?}", action);
+                    (scene, action)
+                })
+                .map(|(scene, action)| {
+                    let transition = scene.update(action, &mut world);
                     println!("ENGINE: transition = {:?}", transition);
-                    action.map(|action| scene.update(action, &mut world));
                     transition
                 })
                 .map(|transition| match transition {
-                    Transition::Continue => {}
+                    Transition::Continue => {},
                     Transition::Exit => {
                         scenes.pop();
-                    }
+                    },
                     Transition::Next(s) => scenes.push(s),
                     Transition::Replace(s) => {
                         scenes.pop();
                         scenes.push(s);
-                    }
+                    },
                 });
 
             if scenes.is_empty() {

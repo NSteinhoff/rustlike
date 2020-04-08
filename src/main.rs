@@ -61,7 +61,7 @@ pub mod dungeon;
 pub mod engine;
 pub mod game;
 
-use crate::game::{Action, Game};
+use crate::game::Game;
 
 /// Width of the game screen in number of tiles
 const SCREEN_WIDTH: i32 = 1920 / 10 / 2;
@@ -130,9 +130,16 @@ pub enum SettingsScreen {
     MainMenu,
 }
 
+#[derive(Debug)]
+pub enum SettingsAction {
+    Cancel,
+    SetName(String),
+    InvalidKey,
+}
+
 impl State for SettingsScreen {
     type World = Option<Settings>;
-    type Action = String;
+    type Action = SettingsAction;
 
     fn render(&self, con: &mut Offscreen, _settings: &Self::World) {
         use SettingsScreen::*;
@@ -165,30 +172,34 @@ impl State for SettingsScreen {
     fn interpret(
         &self,
         event: &Event,
-        _settings: &Self::World,
-    ) -> (Option<Self::Action>, Transition<Self>) {
+    ) -> Self::Action {
         use Event::*;
         use KeyCode::{Enter, Escape};
         use SettingsScreen::*;
-        use Transition::*;
+        use SettingsAction::*;
 
         match self {
             MainMenu => match event {
-                KeyEvent(Key { code: Escape, .. }) => (None, Exit),
-                KeyEvent(Key { code: Enter, .. }) => (Some(String::from("Rodney")), Exit),
-                _ => (None, Continue),
+                KeyEvent(Key { code: Escape, .. }) => Cancel,
+                KeyEvent(Key { code: Enter, .. }) => SetName(String::from("Rodney")),
+                _ => InvalidKey,
             },
         }
     }
 
-    fn update(&self, action: Self::Action, settings: &mut Self::World) {
+    fn update(&self, action: Self::Action, settings: &mut Self::World) -> Transition<Self> {
         use SettingsScreen::*;
+        use SettingsAction::*;
+        use Transition::*;
 
         match self {
-            MainMenu => {
-                settings.replace(Settings::NewGame {
-                    player_name: action,
-                });
+            MainMenu => match action {
+                SetName(name) => {
+                    settings.replace(Settings::NewGame { player_name: name });
+                    Exit
+                },
+                Cancel => Exit,
+                InvalidKey => Continue
             }
         }
     }
@@ -202,9 +213,36 @@ pub enum GameScreen {
     Character,
 }
 
+#[derive(Debug)]
+pub enum GameScreenAction {
+    Nothing,
+    Exit,
+    OpenInventory,
+    OpenCharacterScreen,
+    GameAction(game::Action),
+}
+
+impl GameScreenAction {
+    fn game_action(c: &char) -> Self {
+        use game::Action::*;
+        let a = match c {
+            'k' => Move(PLAYER, Direction(0, -1)),
+            'j' => Move(PLAYER, Direction(0, 1)),
+            'h' => Move(PLAYER, Direction(-1, 0)),
+            'l' => Move(PLAYER, Direction(1, 0)),
+            'y' => Move(PLAYER, Direction(-1, -1)),
+            'u' => Move(PLAYER, Direction(1, -1)),
+            'b' => Move(PLAYER, Direction(-1, 1)),
+            'n' => Move(PLAYER, Direction(1, 1)),
+            _ => game::Action::Nothing,
+        };
+        Self::GameAction(a)
+    }
+}
+
 impl State for GameScreen {
     type World = Game;
-    type Action = Action;
+    type Action = GameScreenAction;
 
     fn render(&self, con: &mut Offscreen, game: &Self::World) {
         use GameScreen::*;
@@ -223,33 +261,44 @@ impl State for GameScreen {
     fn interpret(
         &self,
         event: &Event,
-        game: &Self::World,
-    ) -> (Option<Self::Action>, Transition<Self>) {
+    ) -> Self::Action {
         use Event::*;
         use GameScreen::*;
-        use KeyCode::Escape;
-        use Transition::*;
+        use GameScreenAction::*;
+        use KeyCode::{Escape, Char};
 
         match self {
             GameWorld => match event {
-                KeyEvent(Key { code: Escape, .. }) => (None, Exit),
-                KeyEvent(key) => game.action(key),
-                _ => (None, Continue),
+                KeyEvent(Key { code: Escape, .. }) => Exit,
+                KeyEvent(Key { code: Char, printable: 'i', .. }) => OpenInventory,
+                KeyEvent(Key { code: Char, printable: 'c', .. }) => OpenCharacterScreen,
+                KeyEvent(Key {code: Char, printable: c, .. }) => GameScreenAction::game_action(c),
+                KeyEvent(_) | Event::Nothing => GameScreenAction::Nothing,
             },
-            Inventory => (None, Exit),
-            Character => (None, Exit),
-            Console => (None, Exit),
+            Inventory => Exit,
+            Character => Exit,
+            Console => Exit,
         }
     }
 
-    fn update(&self, action: Self::Action, game: &mut Self::World) {
+    fn update(&self, action: Self::Action, game: &mut Self::World) -> Transition<Self> {
         use GameScreen::*;
+        use GameScreenAction::*;
 
         match self {
-            GameWorld => game.update(action),
-            Inventory => {}
-            Character => {}
-            Console => {}
+            GameWorld => match action {
+                Exit => Transition::Exit,
+                Nothing => Transition::Continue,
+                OpenInventory => Transition::Next(Inventory),
+                OpenCharacterScreen => Transition::Next(Character),
+                GameAction(action) => {
+                    game.update(action);
+                    Transition::Continue
+                }
+            }
+            Inventory => Transition::Exit,
+            Character => Transition::Exit,
+            Console => Transition::Exit,
         }
     }
 }
