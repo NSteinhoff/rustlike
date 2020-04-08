@@ -17,7 +17,7 @@
 //!   and determines the next scene
 //! * `Update` the game state based on the interpretation
 //!
-//! Scenes
+//! States
 //! ------
 //! The game will present different scenes to the player:
 //!
@@ -26,7 +26,7 @@
 //! * Level up screen
 //! * Reward / path selection screen
 //!
-//! Scenes are pushed onto the `SceneStack` based on the results
+//! States are pushed onto the `StateStack` based on the results
 //! of interpreting the player input. When a scene exits, it is popped
 //! off the stack. A scene can also push another scene onto the stack,
 //! which would then need to exit, before returning back to the original
@@ -53,7 +53,7 @@ pub use rostlaube::input::{self, Key, KeyCode};
 pub use rostlaube::map::{self, FovAlgorithm, Map as FovMap};
 pub use rostlaube::rng;
 pub use rostlaube::ui;
-pub use rostlaube::{Event, Scene, Transition};
+pub use rostlaube::{Event, State, Transition};
 
 // Internal
 pub mod ai;
@@ -130,11 +130,11 @@ pub enum SettingsScreen {
     MainMenu,
 }
 
-impl Scene for SettingsScreen {
-    type State = Option<Settings>;
+impl State for SettingsScreen {
+    type World = Option<Settings>;
     type Action = String;
 
-    fn render(&self, con: &mut Offscreen, _settings: &Self::State) {
+    fn render(&self, con: &mut Offscreen, _settings: &Self::World) {
         use SettingsScreen::*;
 
         match self {
@@ -165,7 +165,7 @@ impl Scene for SettingsScreen {
     fn interpret(
         &self,
         event: &Event,
-        _settings: &Self::State,
+        _settings: &Self::World,
     ) -> (Option<Self::Action>, Transition<Self>) {
         use Event::*;
         use KeyCode::{Enter, Escape};
@@ -181,7 +181,7 @@ impl Scene for SettingsScreen {
         }
     }
 
-    fn update(&self, action: Self::Action, settings: &mut Self::State) {
+    fn update(&self, action: Self::Action, settings: &mut Self::World) {
         use SettingsScreen::*;
 
         match self {
@@ -202,11 +202,11 @@ pub enum GameScreen {
     Character,
 }
 
-impl Scene for GameScreen {
-    type State = Game;
+impl State for GameScreen {
+    type World = Game;
     type Action = Action;
 
-    fn render(&self, con: &mut Offscreen, game: &Self::State) {
+    fn render(&self, con: &mut Offscreen, game: &Self::World) {
         use GameScreen::*;
 
         match self {
@@ -223,7 +223,7 @@ impl Scene for GameScreen {
     fn interpret(
         &self,
         event: &Event,
-        game: &Self::State,
+        game: &Self::World,
     ) -> (Option<Self::Action>, Transition<Self>) {
         use Event::*;
         use GameScreen::*;
@@ -242,7 +242,7 @@ impl Scene for GameScreen {
         }
     }
 
-    fn update(&self, action: Self::Action, game: &mut Self::State) {
+    fn update(&self, action: Self::Action, game: &mut Self::World) {
         use GameScreen::*;
 
         match self {

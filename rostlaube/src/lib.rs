@@ -21,27 +21,27 @@ pub struct Engine {
     root: Root,
 }
 
-pub trait Scene: std::marker::Sized {
-    type State;
+pub trait State: std::marker::Sized {
+    type World;
     type Action;
 
-    fn render(&self, root: &mut Offscreen, state: &Self::State);
+    fn render(&self, root: &mut Offscreen, world: &Self::World);
 
     fn interpret(
         &self,
         event: &Event,
-        state: &Self::State,
+        world: &Self::World,
     ) -> (Option<Self::Action>, Transition<Self>);
 
-    fn update(&self, action: Self::Action, state: &mut Self::State);
+    fn update(&self, action: Self::Action, world: &mut Self::World);
 }
 
 #[derive(Debug)]
-pub enum Transition<T: Scene> {
+pub enum Transition<S: State> {
     Exit,
     Continue,
-    Next(T),
-    Replace(T),
+    Next(S),
+    Replace(S),
 }
 
 #[derive(Debug)]
@@ -67,11 +67,11 @@ impl Engine {
         }
     }
 
-    pub fn run<L, S, A>(&mut self, mut state: S, start: L) -> S
+    pub fn run<S, W, A>(&mut self, mut world: W, start: S) -> W
     where
         A: std::fmt::Debug,
-        L: std::fmt::Debug,
-        L: Scene<State = S, Action = A>,
+        S: std::fmt::Debug,
+        S: State<World = W, Action = A>,
     {
         let mut scenes = vec![start];
         while self.running() {
@@ -81,7 +81,7 @@ impl Engine {
                 .last()
                 .map(|scene| {
                     println!("ENGINE: scene = {:?}", scene);
-                    self.render(scene, &state);
+                    self.render(scene, &world);
                     scene
                 })
                 .and_then(|scene| {
@@ -90,10 +90,10 @@ impl Engine {
                     event.map(|e| (scene, e))
                 })
                 .map(|(scene, event)| {
-                    let (action, transition) = scene.interpret(&event, &mut state);
+                    let (action, transition) = scene.interpret(&event, &mut world);
                     println!("ENGINE: action = {:?}", action);
                     println!("ENGINE: transition = {:?}", transition);
-                    action.map(|action| scene.update(action, &mut state));
+                    action.map(|action| scene.update(action, &mut world));
                     transition
                 })
                 .map(|transition| match transition {
@@ -114,16 +114,15 @@ impl Engine {
             }
         }
 
-        state
+        world
     }
 
-    pub fn run_if<L, S, A>(&mut self, state: Option<S>, start: L) -> Option<S>
+    pub fn run_if<S, W, A>(&mut self, world: Option<W>, start: S) -> Option<W>
     where
         A: std::fmt::Debug,
-        L: std::fmt::Debug,
-        L: Scene<State = S, Action = A>,
+        S: State<World = W, Action = A> + std::fmt::Debug,
     {
-        state.map(|s| self.run(s, start))
+        world.map(|s| self.run(s, start))
     }
 
     pub fn exit(&mut self) {
@@ -134,15 +133,15 @@ impl Engine {
 }
 
 impl Engine {
-    fn render<L, S>(&mut self, layer: &L, state: &S)
+    fn render<S, W>(&mut self, layer: &S, world: &W)
     where
-        L: Scene<State = S>,
+        S: State<World = W>,
     {
         self.root.set_default_background(colors::BLACK);
 
         let mut con = Offscreen::new(self.root.width(), self.root.height());
 
-        layer.render(&mut con, state);
+        layer.render(&mut con, world);
 
         console::blit(
             &con,
