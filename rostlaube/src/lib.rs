@@ -13,6 +13,7 @@ pub use tcod::system;
 pub mod geometry;
 pub mod rng;
 pub mod ui;
+pub mod pda;
 
 use geometry::Location;
 
