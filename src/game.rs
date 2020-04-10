@@ -345,7 +345,6 @@ impl Game {
     }
 
     pub fn update(&mut self, action: Action) {
-
         self.player_turn.push(action);
         self.play(&vec![action]);
         self.refresh();
