@@ -93,7 +93,7 @@ const PLAYER: usize = 0; // The player will always be the first object
 fn main() {
     let mut engine = rostlaube::Engine::new(SCREEN_WIDTH, SCREEN_HEIGHT, LIMIT_FPS);
 
-    let settings = engine.run(None, SettingsScreen::MainMenu);
+    let settings = engine.run(None, SettingsScreen::main());
 
     let game = settings.and_then(|settings| match settings {
         Settings::NewGame { player_name } => Some(Game::new(
@@ -127,13 +127,21 @@ pub enum Settings {
 
 #[derive(Debug)]
 pub enum SettingsScreen {
-    MainMenu,
+    MainMenu { player_name: String },
+}
+
+impl SettingsScreen {
+    fn main() -> Self {
+        Self::MainMenu { player_name: Default::default() }
+    }
 }
 
 #[derive(Debug)]
 pub enum SettingsAction {
     Cancel,
-    SetName(String),
+    StartGame,
+    ReadChar(char, bool),
+    DeleteChar,
     InvalidKey,
 }
 
@@ -145,11 +153,18 @@ impl State for SettingsScreen {
         use SettingsScreen::*;
 
         match self {
-            MainMenu => {
+            MainMenu { player_name, .. } => {
                 con.set_default_background(colors::BLACK);
                 con.set_default_foreground(colors::WHITE);
 
                 let (w, h) = (con.width(), con.height());
+
+                let text = format!(
+                    "{}\n\n{}\n\n\n\n\n{}",
+                    "* Rustlike *",
+                    "A short adventure in game development.",
+                    "Press Enter to start a game. ESC to exit.",
+                );
 
                 con.print_rect_ex(
                     w / 2,
@@ -158,14 +173,25 @@ impl State for SettingsScreen {
                     h - 2,
                     BackgroundFlag::Set,
                     TextAlignment::Center,
-                    format!(
-                        "{}\n\n{}\n\n\n\n\n{}",
-                        "* Rustlike *",
-                        "A short adventure in game development.",
-                        "Press Enter to start a game. ESC to exit.",
-                    ),
+                    &text,
                 );
-            } //game.render_main_menu(con),
+
+                let num_lines_intro = con.get_height_rect(
+                    w / 2,
+                    h / 4,
+                    w - 2,
+                    h - 2,
+                    &text,
+                );
+
+                con.print_ex(
+                    w / 2,
+                    h / 4 + num_lines_intro + 3,
+                    BackgroundFlag::Set,
+                    TextAlignment::Center,
+                    format!("Enter name:\n{}", player_name),
+                );
+            }
         }
     }
 
@@ -174,30 +200,47 @@ impl State for SettingsScreen {
         event: &Event,
     ) -> Self::Action {
         use Event::*;
-        use KeyCode::{Enter, Escape};
+        use KeyCode::{Char, Spacebar, Enter, Escape, Backspace};
         use SettingsScreen::*;
         use SettingsAction::*;
 
         match self {
-            MainMenu => match event {
+            MainMenu { .. } => match event {
                 KeyEvent(Key { code: Escape, .. }) => Cancel,
-                KeyEvent(Key { code: Enter, .. }) => SetName(String::from("Rodney")),
+                KeyEvent(Key { code: Enter, .. }) => StartGame,
+                KeyEvent(Key { code: Backspace, .. }) => DeleteChar,
+                KeyEvent(Key { code: Spacebar, printable, .. }) => ReadChar(*printable, false),
+                KeyEvent(Key { code: Char, printable, shift, .. }) => ReadChar(*printable, *shift),
                 _ => InvalidKey,
             },
         }
     }
 
-    fn update(&self, action: Self::Action, settings: &mut Self::World) -> Transition<Self> {
+    fn update(&mut self, action: Self::Action, settings: &mut Self::World) -> Transition<Self> {
         use SettingsScreen::*;
         use SettingsAction::*;
         use Transition::*;
 
         match self {
-            MainMenu => match action {
-                SetName(name) => {
-                    settings.replace(Settings::NewGame { player_name: name });
+            MainMenu { player_name, .. } => match action {
+                StartGame => {
+                    settings.replace(Settings::NewGame { player_name: player_name.clone() });
                     Exit
                 },
+                DeleteChar => {
+                    player_name.pop();
+                    Continue
+                }
+                ReadChar(c, upper) => {
+                    if upper {
+                        for u in c.to_uppercase() {
+                            player_name.push(u);
+                        }
+                    } else {
+                        player_name.push(c);
+                    }
+                    Continue
+                }
                 Cancel => Exit,
                 InvalidKey => Continue
             }
@@ -281,7 +324,7 @@ impl State for GameScreen {
         }
     }
 
-    fn update(&self, action: Self::Action, game: &mut Self::World) -> Transition<Self> {
+    fn update(&mut self, action: Self::Action, game: &mut Self::World) -> Transition<Self> {
         use GameScreen::*;
         use GameScreenAction::*;
 

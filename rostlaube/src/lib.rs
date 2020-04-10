@@ -33,7 +33,7 @@ pub trait State: std::marker::Sized {
         event: &Event,
     ) -> Self::Action;
 
-    fn update(&self, action: Self::Action, world: &mut Self::World) -> Transition<Self>;
+    fn update(&mut self, action: Self::Action, world: &mut Self::World) -> Transition<Self>;
 }
 
 #[derive(Debug)]
@@ -78,10 +78,10 @@ impl Engine {
             println!("ENGINE: scenes: {:?}", scenes);
 
             scenes
-                .last()
+                .pop()
                 .map(|scene| {
                     println!("ENGINE: scene = {:?}", scene);
-                    self.render(scene, &world);
+                    self.render(&scene, &world);
                     scene
                 })
                 .and_then(|scene| {
@@ -94,19 +94,21 @@ impl Engine {
                     println!("ENGINE: action = {:?}", action);
                     (scene, action)
                 })
-                .map(|(scene, action)| {
+                .map(|(mut scene, action)| {
                     let transition = scene.update(action, &mut world);
                     println!("ENGINE: transition = {:?}", transition);
-                    transition
+                    (scene, transition)
                 })
-                .map(|transition| match transition {
-                    Transition::Continue => {},
-                    Transition::Exit => {
-                        scenes.pop();
+                .map(|(scene, transition)| match transition {
+                    Transition::Continue => {
+                        scenes.push(scene);
+                    }
+                    Transition::Exit => {},
+                    Transition::Next(s) => {
+                        scenes.push(scene);
+                        scenes.push(s);
                     },
-                    Transition::Next(s) => scenes.push(s),
                     Transition::Replace(s) => {
-                        scenes.pop();
                         scenes.push(s);
                     },
                 });
