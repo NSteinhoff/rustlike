@@ -14,6 +14,7 @@ pub enum Action {
     Exit,
     OpenInventory,
     OpenCharacterScreen,
+    ListObjects,
     GameAction(game::Action),
 }
 
@@ -60,6 +61,7 @@ impl State for Screen {
                     ..
                 }) => game_action(c),
                 KeyEvent(_) | Event::Nothing => Action::Nothing,
+                Command(c) => execute(c),
             },
             Inventory => Exit,
             Character => Exit,
@@ -79,6 +81,12 @@ impl State for Screen {
                 OpenCharacterScreen => Transition::Next(Character),
                 GameAction(action) => {
                     game.update(action);
+                    Transition::Continue
+                },
+                ListObjects => {
+                    for (i, o) in game.objects.iter().enumerate() {
+                        println!("{}: {:?}", i, o);
+                    }
                     Transition::Continue
                 }
             },
@@ -103,4 +111,17 @@ fn game_action(c: &char) -> Action {
         _ => game::Action::Nothing,
     };
     Action::GameAction(a)
+}
+
+fn execute(command: &str) -> Action {
+    match command {
+        "ls" => {
+            println!("List objects");
+            Action::ListObjects
+        }
+        _ => {
+            println!("Unknown command: {:?}", command);
+            Action::Nothing
+        }
+    }
 }

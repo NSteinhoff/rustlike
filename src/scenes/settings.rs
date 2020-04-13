@@ -88,6 +88,10 @@ impl State for Screen {
                     shift,
                     ..
                 }) => ReadChar(*printable, *shift),
+                Command(c) => {
+                    println!("Execute {:?}", c);
+                    InvalidKey
+                }
                 _ => InvalidKey,
             },
         }

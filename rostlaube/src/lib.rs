@@ -14,15 +14,17 @@ pub mod geometry;
 pub mod rng;
 pub mod ui;
 pub mod pda;
+pub mod command_line;
 
 use geometry::Location;
+use command_line::CommandLine;
 
 pub struct Engine {
     running: bool,
     root: Root,
 }
 
-pub trait State: std::marker::Sized {
+pub trait State: std::marker::Sized + std::fmt::Debug {
     type World;
     type Action;
 
@@ -47,6 +49,7 @@ pub enum Transition<S: State> {
 #[derive(Debug)]
 pub enum Event {
     KeyEvent(input::Key),
+    Command(String),
     Nothing,
 }
 
@@ -195,6 +198,16 @@ impl Engine {
                 println!("ENGINE: CTRL-C received -> Exit!");
                 self.exit();
                 None
+            }
+            Key {
+                code: KeyCode::Char,
+                shift: true,
+                printable: '`',
+                ..
+            } => {
+                let command_string = self.run(String::new(), CommandLine {});
+                println!("ENGINE: $ {:?}", command_string);
+                Some(Command(command_string))
             }
             _ => Some(KeyEvent(key)),
         }
